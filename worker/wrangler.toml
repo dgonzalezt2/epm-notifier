@@ -11,6 +11,10 @@ TELEGRAM_API = "https://api.telegram.org"
 # Nombre público del bot: evita avisar de "procesando" por comandos dirigidos a otros bots en un grupo.
 BOT_USERNAME = "epmofertasbot"
 
+# Disparador de respaldo del cron de ofertas nuevas (minutos 7 y 37 de cada hora, UTC): no coincide con el de GitHub (:00 y :30).
+[triggers]
+crons = ["7,37 * * * *"]
+
 # Sin logs de peticiones: el Worker no registra tokens ni contenido de mensajes.
 [observability]
 enabled = false

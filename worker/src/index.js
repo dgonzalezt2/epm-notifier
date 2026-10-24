@@ -76,7 +76,7 @@ async function sameSecret(a, b) {
 
 // Devuelve { ok, status, message }. ok = GitHub aceptó el evento (204). Un reintento solo ante fallos de red, 5xx o 429.
 // status/message (códigos HTTP y texto público de GitHub, nunca secretos) sirven para diagnosticar un 502.
-async function dispatch(env, update) {
+async function dispatch(env, eventType, clientPayload) {
   const url = `${env.GITHUB_API || 'https://api.github.com'}/repos/${env.GITHUB_REPO}/dispatches`;
   let last = { ok: false, status: 0, message: 'sin respuesta de GitHub' };
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -90,7 +90,7 @@ async function dispatch(env, update) {
           'User-Agent': 'epm-notifier-webhook',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ event_type: 'telegram_update', client_payload: { update } }),
+        body: JSON.stringify({ event_type: eventType, client_payload: clientPayload }),
         signal: AbortSignal.timeout(8000),
       });
       if (res.status === 204) return { ok: true, status: 204, message: '' };
@@ -180,7 +180,14 @@ export default {
     ctx.waitUntil(feedback(env, slim).catch(() => {}));
 
     // 6) Se ESPERA a GitHub: si falla se responde 502 y Telegram reintenta la entrega (el script deduplica por update_id).
-    const r = await dispatch(env, slim);
+    const r = await dispatch(env, 'telegram_update', { update: slim });
     return r.ok ? reply(200, 'ok') : reply(502, `dispatch failed: HTTP ${r.status} ${r.message}`.trim());
+  },
+
+  // Disparador de respaldo (Cron Trigger de Cloudflare, ver wrangler.toml): el schedule de GitHub no es fiable, así que
+  // este "tick" lanza el workflow de ofertas nuevas. Usa el mismo token (repository_dispatch con event_type propio).
+  // Si coincide con el cron de GitHub no pasa nada: ambos comparten grupo de concurrency y seen.json evita avisos repetidos.
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(dispatch(env, 'cron_tick', { source: 'cloudflare-cron' }).then(() => {}, () => {}));
   },
 };

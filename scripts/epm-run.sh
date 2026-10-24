@@ -169,7 +169,9 @@ cron_mode() {
 }
 
 mkdir -p "$TMP"
-case "$EVENT" in
-  repository_dispatch) webhook_mode ;;
+# cron_tick (disparador de respaldo del Worker) es una ejecución de ofertas nuevas, igual que el cron de GitHub.
+case "$EVENT:${EVENT_ACTION:-}" in
+  repository_dispatch:cron_tick) cron_mode ;;
+  repository_dispatch:*) webhook_mode ;;
   *) cron_mode ;;
 esac

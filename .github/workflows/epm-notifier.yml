@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   # Lo dispara el Cloudflare Worker (webhook de Telegram): una ejecución por comando o botón.
   repository_dispatch:
-    types: [telegram_update]
+    types: [telegram_update, cron_tick] # cron_tick: disparador de respaldo (Cron Trigger del Worker)
 
 # Escribe solo en la rama `state` (estado del bot); el código de `main` no se toca.
 permissions:
@@ -17,7 +17,7 @@ permissions:
 #   grupo y cancela las más viejas, así que con un grupo común varias pulsaciones seguidas se perderían.
 #   El orden de escritura en `state` lo resuelve scripts/epm-run.sh (reintenta sobre el estado más reciente).
 concurrency:
-  group: ${{ github.event_name == 'repository_dispatch' && format('tg-{0}', github.event.client_payload.update.update_id) || 'epm-cron' }}
+  group: ${{ github.event_name == 'repository_dispatch' && github.event.action == 'telegram_update' && format('tg-{0}', github.event.client_payload.update.update_id) || 'epm-cron' }}
   cancel-in-progress: false
 
 jobs:
@@ -46,6 +46,7 @@ jobs:
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
           # Para reenviar comandos pendientes como repository_dispatch (respaldo del cron).
           GITHUB_TOKEN: ${{ github.token }}
+          EVENT_ACTION: ${{ github.event.action }}
           KEYWORDS: ${{ vars.KEYWORDS }}
           PERFIL: ${{ vars.PERFIL }}
           STATE_FILE: ${{ github.workspace }}/run/seen.json
