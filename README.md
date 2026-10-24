@@ -98,6 +98,42 @@ Profesional, tecnólogo, técnico, oficial de operación y mantenimiento, electr
   <a href="docs/screenshots/ayuda.png"><img src="docs/screenshots/ayuda.png" alt="Ayuda y comandos" width="700"></a>
 </p>
 
+## Qué muestra cada oferta
+
+Cada oferta (en el botón **📋 Ofertas**, en los perfiles y en el aviso de oferta nueva) usa la misma tarjeta:
+
+```
+🆕 TECNÓLOGO-TECNÓLOGA OPERACIÓN MANTENIMIENTO Y SERVICIOS     ← el título es el enlace a la oferta
+👥 Dirigida a: Servidores de EPM — «Servidores/as de EPM que hacen parte de la Gerencia…»
+📍 Medellín, Antioquia, Colombia
+📅 Publicada: 22 oct 2026 · ⏰ Cierra: 27 oct 2026 (en 3 días)
+Realizar actividades técnicas, operativas y administrativas requerida en los procesos de…
+```
+
+El 🆕 aparece solo en el aviso de oferta nueva, que además añade el salario, el contrato y los requisitos.
+
+- **Título clicable.** El enlace se arma con el ID validado de la oferta y la plantilla pública de EPM; nunca con una URL que venga dentro del contenido de EPM. La vista previa del enlace está desactivada para que varias ofertas no llenen el chat de tarjetas.
+- **Descripción breve.** Campo `ShortDescriptionStr` de EPM (texto plano), unos 350 caracteres, cortado en frontera de palabra.
+- **Fechas en hora de Bogotá (UTC−5).** EPM entrega la fecha límite como `…T04:59:00Z`, que en Colombia son las **23:59 del día anterior**; por eso se convierte antes de mostrarla. Se indica «cierra hoy», «cierra mañana» o «en N días». Las ofertas **ya cerradas no se presentan como disponibles**: se omiten del botón (con un aviso de cuántas son) y no se notifican.
+- **Si falta algún dato:** sin fecha límite se muestra «No especificada»; si el detalle de EPM no responde, la tarjeta sale igual con los datos del listado, «No determinado» y la descripción del listado (o «Descripción no disponible»).
+
+### ¿Cómo se determina «Dirigida a»?
+
+La API de EPM **no tiene un campo que distinga ofertas internas de externas**. Se combina lo que sí hay:
+
+| Fuente | Resultado | Fiabilidad |
+|---|---|---|
+| `RequisitionType = Privado` (campo explícito) | «Por invitación (proceso privado)» | Alta |
+| Frase «Público objetivo» del texto de la oferta que menciona «servidores» | «Servidores de EPM» | Heurística |
+| …que dice «abierto a la comunidad» o «público en general» | «Público general» | Heurística |
+| Ambas cosas, ninguna, o servidores de otra empresa (CHEC, ESSA…) | «No determinado» | — |
+
+Cuando la etiqueta sale del texto, se muestra el **fragmento literal** entre «…» para que cualquiera pueda comprobarlo. Con las 20 ofertas que la API publicaba el 2026-10-24 el resultado coincide con lo que dice cada oferta (12 de servidores, 1 abierta a la comunidad, 7 por invitación), pero son pocas y las redactó el mismo equipo: si EPM cambia la redacción, la etiqueta puede caer en «No determinado» o equivocarse, y por eso el fragmento siempre acompaña a la etiqueta. Varias ofertas del Programa de Inclusión Laboral van dirigidas a *personas con discapacidad que ya son servidores*; el fragmento lo deja claro.
+
+> **Alcance:** el bot vigila el sitio «EPM Sitio» (`CX_1`), que el 2026-10-24 tenía 12 de las 20 ofertas que expone la API. Las otras 8 están en sitios privados (por invitación) o de filiales (CHEC, ESSA…) y no se vigilan. Por eso «Público general» casi no aparece hoy.
+
+> Las capturas de «Cómo se ve» son anteriores a esta tarjeta y muestran el formato previo de las ofertas.
+
 ## Cómo funciona
 
 El bot **no corre de forma permanente**: lo ejecuta [GitHub Actions](.github/workflows/epm-notifier.yml) cuando hace falta, y funciona aunque mi computador esté apagado (Telegram solo entrega mensajes; el código lo ejecuta GitHub).
@@ -114,7 +150,7 @@ El bot **no corre de forma permanente**: lo ejecuta [GitHub Actions](.github/wor
 
 **Ejecución por cron (cada 30 minutos):**
 1. **Restaura el estado** desde la rama `state`.
-2. **Consulta la API de EPM** (`recruitingCEJobRequisitions`, con paginación) y compara con los ids ya vistos.
+2. **Consulta la API de EPM** (`recruitingCEJobRequisitions`, con paginación) y compara con los ids ya vistos. También guarda en `state` los datos públicos de cada oferta (audiencia y fechas, `seen.json.offers`) para que el botón de ofertas no tenga que pedir el detalle de EPM oferta por oferta (~0,45 s cada una).
 3. **Notifica por Telegram** las ofertas nuevas: a los chats autorizados y a los suscriptores, según el perfil que eligieron. Por cada oferta pide el detalle (`recruitingCEJobRequisitionDetails`) y envía título, ubicación, fecha, resumen, requisitos y enlace.
 4. **Guarda el estado** en la rama `state`, solo si todo terminó bien.
 5. **Respaldo de comandos:** con el webhook sano no lee mensajes; si Telegram no consigue entregarlos, recoge los pendientes (ver [Si el Worker falla](#si-el-worker-falla)).
@@ -134,6 +170,7 @@ Es una rama huérfana que crea y actualiza el propio workflow (no se edita a man
 | Archivo | Contenido | En el repo público |
 |---|---|---|
 | `seen.json` | ids de ofertas ya vistas | en claro |
+| `seen.json.offers` | datos públicos de cada oferta: audiencia y fechas (sin descripción larga) | en claro |
 | `seen.json.applied` | últimos `update_id` aplicados (evita aplicar dos veces un cambio) | en claro |
 | `seen.json.tgoffset` | último mensaje leído con `getUpdates` (solo modo sin webhook y respaldo) | en claro |
 | `seen.json.subs.enc` | suscriptores (chat ids y perfiles) | **cifrado** |
@@ -147,6 +184,30 @@ Es una rama huérfana que crea y actualiza el propio workflow (no se edita a man
 > ⚡ **Novedad (2026-10-24):** los comandos y botones ahora responden en **~15–30 segundos** (antes, hasta ~30 minutos). Sigue siendo **100 % gratis** (Cloudflare Workers + GitHub Actions) y **no depende de ningún computador encendido**.
 
 Antes, el bot solo leía los mensajes de Telegram cuando corría el cron. Ahora Telegram avisa por *webhook* a un [Worker de Cloudflare](worker/src/index.js), que dispara el workflow al instante con `repository_dispatch`. El cron de 30 minutos sigue siendo el respaldo y el que avisa de las ofertas nuevas.
+
+### ¿Por qué las respuestas tardan unos segundos?
+
+El bot no está «encendido» esperando: **se despierta bajo demanda**, y por eso es gratis. Cada pulsación hace este recorrido:
+
+1. **Telegram avisa al Cloudflare Worker** (instantáneo).
+2. **El Worker valida la petición** y dispara un `repository_dispatch` en GitHub (~0,5 s).
+3. **GitHub Actions asigna una máquina virtual nueva**, descarga el código, prepara Node y descifra el estado (~10–25 s: es el paso lento).
+4. **El script procesa la acción**, guarda el estado en la rama `state` y responde por Telegram.
+
+Medido el 2026-10-24: **11–25 s por ejecución, mediana 15 s**. Si varias personas pulsan a la vez, cada pulsación dispara su propia ejecución (se ven en la pestaña Actions) y se procesan en paralelo.
+
+### Aviso de «procesando»
+
+Para que nadie piense que el bot se colgó, el Worker avisa **antes** de que arranque el job, en paralelo al dispatch y sin retrasarlo:
+
+- **Botones:** aviso flotante «⏳ Procesando… puede tardar unos segundos, ten paciencia» y «escribiendo…» en la cabecera del chat (repetido una vez a los ~4,5 s).
+- **Comandos:** «escribiendo…» (con la misma repetición).
+- **Menú principal:** nota fija «⏳ Las respuestas pueden tardar unos segundos. ¡Gracias por la paciencia!».
+- **No se avisa** para updates que el Worker descarta, chats que superan el límite ni comandos dirigidos a otros bots. Si Telegram falla al avisar, el dispatch y la respuesta del Worker no cambian.
+
+**¿Por qué un aviso flotante y no la ruedita del botón?** Telegram muestra una ruedita en el botón hasta que el bot responde al callback (`answerCallbackQuery`, que solo puede llamarse una vez). Responder desde el job significa hacerlo 10–25 s después: la ruedita podría cortarse sola por tiempo (Telegram no documenta el límite exacto) y el usuario no vería ningún texto. Por eso el Worker responde al instante con el aviso flotante: la ruedita desaparece enseguida, pero hay un mensaje claro, y el «escribiendo…» cubre el resto de la espera. La llamada tardía del job queda como respaldo inofensivo (falla en silencio si el Worker ya respondió).
+
+El aviso necesita el secret `TELEGRAM_BOT_TOKEN` en el Worker (`npx wrangler secret put TELEGRAM_BOT_TOKEN`).
 
 ### Garantías de diseño
 
@@ -165,6 +226,7 @@ npx wrangler login                       # cuenta gratuita de Cloudflare
 npx wrangler deploy                      # publica https://<worker>.<subdominio>.workers.dev
 npx wrangler secret put WEBHOOK_SECRET   # el mismo valor que TELEGRAM_WEBHOOK_SECRET
 npx wrangler secret put GH_DISPATCH_TOKEN
+npx wrangler secret put TELEGRAM_BOT_TOKEN   # aviso de "procesando"
 ```
 
 1. **Token de GitHub** (`GH_DISPATCH_TOKEN`): *Settings → Developer settings → Fine-grained tokens*. Propietario: tu usuario; **Only select repositories** → solo este repo; permiso **Contents: Read and write** (Metadata read-only se añade solo) y ningún otro. **Caducidad corta (p. ej. 90 días)**.
@@ -185,6 +247,7 @@ Los `secret put` guardan los valores cifrados en Cloudflare: nunca van en `wrang
 |---|---|---|
 | Worker (Cloudflare) | `WEBHOOK_SECRET` | Valida el header `X-Telegram-Bot-Api-Secret-Token` |
 | Worker (Cloudflare) | `GH_DISPATCH_TOKEN` | Token fine-grained que dispara el `repository_dispatch` |
+| Worker (Cloudflare) | `TELEGRAM_BOT_TOKEN` | Solo para el aviso de «procesando» (`answerCallbackQuery` y `sendChatAction`) |
 | GitHub Actions | `TELEGRAM_WEBHOOK_SECRET` | Opcional: permite al cron volver a registrar el webhook solo |
 | GitHub Actions | `WEBHOOK_URL` | Opcional: URL del Worker, para el mismo fin |
 
@@ -258,7 +321,9 @@ Variables de entorno (`.env` o entorno): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID
 ### Limitaciones
 
 - **Los schedules de GitHub no son exactos:** pueden retrasarse minutos, y más en horas pico. El mínimo permitido es 5 minutos; para ofertas laborales 30 minutos es suficiente.
-- **Comandos y botones: ~15–30 s** (arranque del job de Actions más el proceso), no instantáneos. Cada comando o botón es una ejecución de Actions: aparecen en la pestaña Actions y consumen sus [límites gratuitos](https://docs.github.com/actions/administering-github-actions/usage-limits-billing-and-administration) (en repos públicos los minutos son ilimitados, pero hay un máximo de trabajos simultáneos). Si el Worker o GitHub fallan, el cron recoge los pendientes (ver [Si el Worker falla](#si-el-worker-falla)).
+- **Comandos y botones: 11–25 s por ejecución (mediana 15 s, medido el 2026-10-24)**, no instantáneos: es el arranque del job de Actions. Dentro del bot se avisa con el aviso de «procesando». Cada comando o botón es una ejecución de Actions: aparecen en la pestaña Actions y consumen sus [límites gratuitos](https://docs.github.com/actions/administering-github-actions/usage-limits-billing-and-administration) (en repos públicos los minutos son ilimitados, pero hay un máximo de trabajos simultáneos). Si el Worker o GitHub fallan, el cron recoge los pendientes (ver [Si el Worker falla](#si-el-worker-falla)).
+- **Datos que pueden faltar:** la fecha límite y la audiencia solo vienen en el detalle de cada oferta. Si EPM no responde, la tarjeta sale con «No especificada» / «No determinado». «Dirigida a» es en parte una heurística (ver [Qué muestra cada oferta](#qué-muestra-cada-oferta)).
+- **Alcance:** solo se vigila el sitio `CX_1` («EPM Sitio»): 12 de las 20 ofertas que expone la API el 2026-10-24. Los sitios privados y de filiales no se vigilan.
 - **Límites gratuitos de Cloudflare:** el plan Workers Free permite un número diario de peticiones (consulta el límite vigente en la documentación de Cloudflare); este bot usa muy pocas. Además hay un límite propio por chat (8 updates cada 10 s) para evitar abusos.
 - **Minutos de Actions:** en repos **públicos** son ilimitados. En repos **privados** hay 2.000 min gratis al mes y cada ejecución cuenta al menos 1 minuto; por eso son 30 minutos y no 15 o 20 (48 ejecuciones al día ≈ 1.440 min al mes).
 - Si la API de EPM rechazara las IPs de GitHub, el job fallaría de forma visible y se avisaría por Telegram.
@@ -322,6 +387,8 @@ El token solo vive en GitHub Secrets (o en `.env` para pruebas locales). `.env` 
 
 ## Historial de cambios
 
+- **2026-10-24 — Ofertas con título clicable, descripción breve, audiencia (servidores EPM / público general), fecha de publicación y fecha límite.** Una sola tarjeta para el botón de ofertas y para el aviso de oferta nueva, con fechas en hora de Bogotá, ofertas cerradas fuera del botón y una caché pública de audiencia y fechas en la rama `state`. Se corrigió un error del aviso de oferta nueva, que mostraba la fecha límite un día tarde por usarla en UTC.
+- **2026-10-24 — Aviso de procesamiento:** aviso flotante en botones, «escribiendo…» en comandos y botones, y nota en el menú, enviados por el Worker antes de que arranque el job.
 - **2026-10-24 — Respuesta rápida con Cloudflare Worker.** Se agregó un Worker de Cloudflare que recibe el webhook de Telegram y dispara el workflow con `repository_dispatch`: los comandos y botones pasan de responder en hasta ~30 minutos a **~15–30 segundos**, sin costo. El estado se guarda ahora de forma transaccional (una ejecución por update, reintento ante conflictos y deduplicación por `update_id`), y el cron de 30 minutos queda como respaldo y para los avisos de ofertas nuevas. Los logs de Actions ya no incluyen ids de chat ni comandos de usuarios.
 - **2026-10-24 — Ejecución con GitHub Actions.** El bot dejó de depender de un computador encendido: corre en GitHub Actions cada 30 minutos y guarda el estado en la rama `state` (suscriptores y chats cifrados).
 - **2026-10-24 — Suscripciones públicas y perfiles por cargo.** Cualquier persona puede consultar y suscribirse a todas las ofertas o a perfiles concretos; menú con botones, administración de grupos y aviso legal.
