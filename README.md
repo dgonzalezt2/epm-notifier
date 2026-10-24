@@ -2,7 +2,7 @@
 
 [![EPM Notifier](https://github.com/dgonzalezt2/epm-notifier/actions/workflows/epm-notifier.yml/badge.svg)](https://github.com/dgonzalezt2/epm-notifier/actions/workflows/epm-notifier.yml)
 
-Consulta la API REST pública de Oracle HCM que usa la página de empleo de EPM y avisa por Telegram de las ofertas nuevas. Node.js 20+, sin dependencias. Se ejecuta con **GitHub Actions** cada 30 minutos, sin servidores ni depender de ningún computador encendido.
+Consulta la API REST pública de Oracle HCM que usa la página de empleo de EPM y avisa por Telegram de las ofertas nuevas. Node.js 20+, sin dependencias. Corre en **GitHub Actions** (cron cada 30 minutos para las ofertas nuevas) y los comandos y botones responden en **~15–30 segundos** gracias a un **Cloudflare Worker**. 100 % gratis, sin servidores y sin depender de ningún computador encendido.
 
 ## Pruébalo
 
@@ -20,7 +20,7 @@ Consulta la API REST pública de Oracle HCM que usa la página de empleo de EPM 
 
 > El bot solo guarda el id de tu chat para enviarte los avisos. Puedes cancelarlos cuando quieras desde el mismo menú.
 > ⚠️ Proyecto personal y educativo, **no oficial ni afiliado a EPM** (ver [Aviso legal](#aviso-legal)). Las ofertas se postulan siempre en la página de empleo de EPM.
-> ⏱️ El bot no corre de forma permanente: GitHub Actions lo ejecuta cada 30 minutos. Los avisos de ofertas nuevas y las respuestas a los botones pueden tardar hasta ~30 minutos (ver [Cómo funciona](#cómo-funciona)).
+> ⏱️ El bot no corre de forma permanente: los comandos y botones responden en ~15–30 s (el arranque de un job de GitHub Actions) y las ofertas nuevas se avisan en la siguiente revisión, cada ~30 minutos (ver [Cómo funciona](#cómo-funciona)).
 
 ## Aviso legal
 
@@ -100,21 +100,32 @@ Profesional, tecnólogo, técnico, oficial de operación y mantenimiento, electr
 
 ## Cómo funciona
 
-El bot **no corre de forma permanente**. [GitHub Actions](.github/workflows/epm-notifier.yml) lo ejecuta automáticamente **cada 30 minutos** (cron). En cada ejecución:
+El bot **no corre de forma permanente**: lo ejecuta [GitHub Actions](.github/workflows/epm-notifier.yml) cuando hace falta, y funciona aunque mi computador esté apagado (Telegram solo entrega mensajes; el código lo ejecuta GitHub).
 
+```
+ Comandos y botones (respuesta en ~15–30 s)
+ Telegram ──webhook──▶ Cloudflare Worker ──repository_dispatch──▶ GitHub Actions ──▶ Telegram
+                        valida el secret,                         una ejecución por       responde y
+                        reduce la update                          comando o botón         guarda el estado
+
+ Ofertas nuevas (y respaldo de comandos)
+ Cron cada 30 min ──▶ GitHub Actions ──▶ API de EPM ──▶ avisos por Telegram ──▶ guarda el estado
+```
+
+**Ejecución por cron (cada 30 minutos):**
 1. **Restaura el estado** desde la rama `state`.
-2. **Atiende** los mensajes y botones que llegaron a Telegram desde la ejecución anterior.
-3. **Consulta la API de EPM** (`recruitingCEJobRequisitions`, con paginación) y compara con los ids ya vistos.
-4. **Notifica por Telegram** las ofertas nuevas: a los chats autorizados y a los suscriptores, según el perfil que eligieron. Por cada oferta pide el detalle (`recruitingCEJobRequisitionDetails`) y envía título, ubicación, fecha, resumen, requisitos y enlace.
-5. **Guarda el estado** en la rama `state`, solo si todo terminó bien.
+2. **Consulta la API de EPM** (`recruitingCEJobRequisitions`, con paginación) y compara con los ids ya vistos.
+3. **Notifica por Telegram** las ofertas nuevas: a los chats autorizados y a los suscriptores, según el perfil que eligieron. Por cada oferta pide el detalle (`recruitingCEJobRequisitionDetails`) y envía título, ubicación, fecha, resumen, requisitos y enlace.
+4. **Guarda el estado** en la rama `state`, solo si todo terminó bien.
+5. **Respaldo de comandos:** con el webhook sano no lee mensajes; si Telegram no consigue entregarlos, recoge los pendientes (ver [Si el Worker falla](#si-el-worker-falla)).
 
-Por eso funciona aunque mi computador esté apagado: Telegram solo entrega mensajes, el código lo ejecuta GitHub.
+**Ejecución por comando o botón (webhook):** el Worker dispara el workflow con la update; el script la procesa, guarda el estado y envía la respuesta. No consulta la API de EPM.
 
 - **Primera ejecución** (sin `seen.json`): guarda las ofertas existentes **sin notificarlas** y envía "Notificador EPM activo".
 - Todas las ofertas del listado se marcan como vistas, también las que no pasan `KEYWORDS`.
 - Si hay un error (HTTP, parseo, Telegram), se imprime y se avisa al administrador por Telegram. Hay reintentos con *backoff* para errores de red, 5xx y 429.
 - **Si el script falla, el job falla de forma visible** (código ≠ 0) y **no se guarda estado**: nunca queda un `seen.json` a medias.
-- `concurrency` impide que corran dos ejecuciones a la vez y `timeout-minutes: 5` corta las que se cuelgan.
+- `timeout-minutes: 5` corta las ejecuciones que se cuelgan; el cron y las ejecuciones manuales nunca corren a la vez.
 
 ### El estado vive en la rama `state`
 
@@ -123,12 +134,80 @@ Es una rama huérfana que crea y actualiza el propio workflow (no se edita a man
 | Archivo | Contenido | En el repo público |
 |---|---|---|
 | `seen.json` | ids de ofertas ya vistas | en claro |
-| `seen.json.tgoffset` | último mensaje de Telegram procesado | en claro |
+| `seen.json.applied` | últimos `update_id` aplicados (evita aplicar dos veces un cambio) | en claro |
+| `seen.json.tgoffset` | último mensaje leído con `getUpdates` (solo modo sin webhook y respaldo) | en claro |
 | `seen.json.subs.enc` | suscriptores (chat ids y perfiles) | **cifrado** |
 | `seen.json.chats.enc` | chats autorizados | **cifrado** |
 | `last_run` | fecha de la última ejecución | en claro |
 
 `last_run` se actualiza como máximo una vez al día: así el repositorio mantiene actividad y GitHub no desactiva el schedule por inactividad (60 días).
+
+## Respuesta rápida con Cloudflare Worker
+
+> ⚡ **Novedad (2026-10-24):** los comandos y botones ahora responden en **~15–30 segundos** (antes, hasta ~30 minutos). Sigue siendo **100 % gratis** (Cloudflare Workers + GitHub Actions) y **no depende de ningún computador encendido**.
+
+Antes, el bot solo leía los mensajes de Telegram cuando corría el cron. Ahora Telegram avisa por *webhook* a un [Worker de Cloudflare](worker/src/index.js), que dispara el workflow al instante con `repository_dispatch`. El cron de 30 minutos sigue siendo el respaldo y el que avisa de las ofertas nuevas.
+
+### Garantías de diseño
+
+- **Una ejecución por update**, cada una con su propio grupo de `concurrency`. GitHub conserva solo *una* ejecución pendiente por grupo y cancela las más viejas, así que con un grupo común varias pulsaciones seguidas se perderían.
+- **Estado transaccional.** Cada ejecución restaura el estado más reciente, aplica la update (las respuestas quedan en cola, sin enviarse), guarda con `git push` y **solo si el push funcionó** envía las respuestas. Si otra ejecución guardó antes (push rechazado), descarta todo y repite sobre el estado nuevo, hasta 8 veces. Así no hay respuestas duplicadas ni estado a medias. No se usa `git rebase`: los archivos cifrados son binarios y no se pueden fusionar.
+- **Deduplicación por `update_id`** para los cambios de estado (suscripciones y administración), en caso de que Telegram reenvíe una update.
+- **Sin pérdidas ante fallos:** el Worker *espera* la respuesta de GitHub y, si falla, responde 5xx para que Telegram reintente la entrega.
+- **Límite por chat** en el Worker (8 updates cada 10 s) para que nadie dispare cientos de ejecuciones.
+- El Worker solo reenvía comandos (`/…`) y pulsaciones de botón, con una update mínima (ids y texto del comando). No registra nada en logs.
+
+### Desplegar el Worker
+
+```bash
+cd worker && npm install                 # única dependencia: wrangler
+npx wrangler login                       # cuenta gratuita de Cloudflare
+npx wrangler deploy                      # publica https://<worker>.<subdominio>.workers.dev
+npx wrangler secret put WEBHOOK_SECRET   # el mismo valor que TELEGRAM_WEBHOOK_SECRET
+npx wrangler secret put GH_DISPATCH_TOKEN
+```
+
+1. **Token de GitHub** (`GH_DISPATCH_TOKEN`): *Settings → Developer settings → Fine-grained tokens*. Propietario: tu usuario; **Only select repositories** → solo este repo; permiso **Contents: Read and write** (Metadata read-only se añade solo) y ningún otro. **Caducidad corta (p. ej. 90 días)**.
+2. **Secret del webhook:** una cadena aleatoria larga, por ejemplo `openssl rand -hex 32`. Se guarda en el Worker (`WEBHOOK_SECRET`), en GitHub (`TELEGRAM_WEBHOOK_SECRET`) y, para registrar el webhook, en tu `.env`.
+3. **Vacía los pendientes** antes del primer registro (ejecuta una vez el workflow en el modo anterior); con `drop_pending_updates=false` todo lo acumulado en 24 h se entregaría de golpe.
+4. **Registra el webhook** (lee token y secret de tu entorno y no los imprime):
+   ```bash
+   node epm-notifier.mjs --set-webhook=https://<tu-worker>.<subdominio>.workers.dev
+   node epm-notifier.mjs --webhook-info     # activo: sí | pendientes: 0
+   ```
+5. **Comprueba el rechazo:** un `POST` sin el header `X-Telegram-Bot-Api-Secret-Token` correcto debe devolver **401** y no disparar ningún workflow.
+
+Los `secret put` guardan los valores cifrados en Cloudflare: nunca van en `wrangler.toml` ni en el repositorio. En `wrangler.toml` solo hay valores públicos (el nombre del repo).
+
+### Secrets necesarios (solo nombres)
+
+| Dónde | Nombre | Para qué |
+|---|---|---|
+| Worker (Cloudflare) | `WEBHOOK_SECRET` | Valida el header `X-Telegram-Bot-Api-Secret-Token` |
+| Worker (Cloudflare) | `GH_DISPATCH_TOKEN` | Token fine-grained que dispara el `repository_dispatch` |
+| GitHub Actions | `TELEGRAM_WEBHOOK_SECRET` | Opcional: permite al cron volver a registrar el webhook solo |
+| GitHub Actions | `WEBHOOK_URL` | Opcional: URL del Worker, para el mismo fin |
+
+Los de GitHub son opcionales: sin ellos, si el webhook falla el cron lo desactiva, atiende los pendientes y te avisa, pero no lo vuelve a registrar.
+
+### Rotar los secretos
+
+- **Token de GitHub:** crea uno nuevo con la misma configuración → `npx wrangler secret put GH_DISPATCH_TOKEN` → revoca el anterior. Antes de que caduque: si vence, el Worker responde `502 dispatch failed: HTTP 401` y el cron recoge los pendientes (usa el `GITHUB_TOKEN` del job, no ese token).
+- **Secret del webhook:** genera uno nuevo → `npx wrangler secret put WEBHOOK_SECRET` → `gh secret set TELEGRAM_WEBHOOK_SECRET` → actualiza tu `.env` → `node epm-notifier.mjs --set-webhook=<url>`.
+- **Token del bot:** `/revoke` en @BotFather, actualiza el Secret `TELEGRAM_BOT_TOKEN` y vuelve a registrar el webhook.
+
+### Desactivar el webhook (volver al modo solo-cron)
+
+```bash
+node epm-notifier.mjs --delete-webhook   # conserva los mensajes pendientes
+```
+Con el webhook desactivado, el cron vuelve a leer los mensajes con `getUpdates` (los comandos tardan hasta ~30 min, como antes) y no lo reactiva por su cuenta. Mientras haya webhook activo, `getUpdates` y `--listen` no funcionan (Telegram responde 409).
+
+### Si el Worker falla
+
+- **Ofertas nuevas:** no dependen del Worker; el cron las sigue enviando.
+- **Worker o GitHub caídos, o token vencido:** Telegram reintenta la entrega y conserva los mensajes pendientes hasta 24 h. En su siguiente ejecución, el cron detecta `pending_update_count > 0` con un error reciente, **desactiva el webhook sin perder pendientes, reenvía cada mensaje al workflow como `repository_dispatch` (con el `GITHUB_TOKEN` del job, hasta 50 por corrida), vuelve a registrar el webhook** si hay `WEBHOOK_URL` y `TELEGRAM_WEBHOOK_SECRET`, y te avisa por Telegram.
+- Para diagnosticar, el Worker responde `502` con el código y el mensaje públicos de GitHub (por ejemplo `HTTP 403 Resource not accessible by personal access token`, que indica permisos del token insuficientes).
 
 ## Configuración
 
@@ -143,6 +222,7 @@ En el repositorio: **Settings → Secrets and variables → Actions**.
 | `STATE_KEY` | Secret | Sí | Clave para cifrar suscriptores y chats en la rama `state`. Genérala con `openssl rand -base64 32` y guárdala: **si cambia o se pierde, no se pueden descifrar** `subs`/`chats` y las suscripciones se pierden |
 | `KEYWORDS` | Variable | No | Palabras clave separadas por coma; filtra por título/ubicación (sin tildes ni mayúsculas) |
 | `PERFIL` | Variable | No | Perfil(es) para el filtro de los chats autorizados, p. ej. `sistemas` o `sistemas,civil` (ver [Perfiles](#perfiles-filtro-por-carrera)) |
+| `TELEGRAM_WEBHOOK_SECRET`, `WEBHOOK_URL` | Secret | No | Respaldo del webhook: permiten al cron volver a registrarlo solo (ver [Respuesta rápida](#respuesta-rápida-con-cloudflare-worker)) |
 
 Con la CLI de GitHub (te pide el valor sin mostrarlo):
 ```bash
@@ -151,6 +231,7 @@ gh secret set TELEGRAM_CHAT_ID
 gh secret set STATE_KEY
 gh variable set KEYWORDS --body "ingeniero,sistemas"   # opcional
 ```
+El Worker de Cloudflare tiene sus propios secretos (ver [Respuesta rápida](#respuesta-rápida-con-cloudflare-worker)).
 Los secretos solo se pasan a los pasos que los necesitan (nunca a nivel de job completo) y GitHub los enmascara en los logs; además el script oculta el token y enmascara los chat ids en lo que imprime.
 
 ### Lanzarlo a mano y verificar que funciona
@@ -158,6 +239,8 @@ Los secretos solo se pasan a los pasos que los necesitan (nunca a nivel de job c
 1. Ve a **Actions → EPM Notifier → Run workflow** (o `gh workflow run epm-notifier.yml` y `gh run watch`).
 2. En la primera ejecución debe llegarte a Telegram **"✅ Notificador EPM activo"** y en el log verás `Primera ejecución: N ofertas registradas`. Aparece la rama `state` con un commit `state: update seen.json [skip ci]`.
 3. Lánzalo una **segunda vez**: el log dice `Listado: N ofertas, 0 nuevas`, no llega ninguna notificación repetida y, si no hubo cambios, el paso de guardado imprime `Sin cambios de estado`.
+
+4. Con el webhook activo, escribe `/start` al bot: debe llegar el menú en menos de un minuto y aparecer en **Actions** una ejecución disparada por `repository_dispatch`.
 
 Para ver el estado guardado: `git fetch origin state && git show origin/state:seen.json`.
 
@@ -175,7 +258,8 @@ Variables de entorno (`.env` o entorno): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID
 ### Limitaciones
 
 - **Los schedules de GitHub no son exactos:** pueden retrasarse minutos, y más en horas pico. El mínimo permitido es 5 minutos; para ofertas laborales 30 minutos es suficiente.
-- **Respuesta a comandos y botones con retraso:** el bot solo "escucha" cuando corre el workflow, así que `/ofertas`, `/perfiles` o *Suscribirme* pueden tardar hasta ~30 minutos en responder (Telegram conserva los mensajes pendientes 24 horas). Para respuesta inmediata necesitas un proceso siempre activo (ver [alternativas](#alternativas-de-despliegue)).
+- **Comandos y botones: ~15–30 s** (arranque del job de Actions más el proceso), no instantáneos. Cada comando o botón es una ejecución de Actions: aparecen en la pestaña Actions y consumen sus [límites gratuitos](https://docs.github.com/actions/administering-github-actions/usage-limits-billing-and-administration) (en repos públicos los minutos son ilimitados, pero hay un máximo de trabajos simultáneos). Si el Worker o GitHub fallan, el cron recoge los pendientes (ver [Si el Worker falla](#si-el-worker-falla)).
+- **Límites gratuitos de Cloudflare:** el plan Workers Free permite un número diario de peticiones (consulta el límite vigente en la documentación de Cloudflare); este bot usa muy pocas. Además hay un límite propio por chat (8 updates cada 10 s) para evitar abusos.
 - **Minutos de Actions:** en repos **públicos** son ilimitados. En repos **privados** hay 2.000 min gratis al mes y cada ejecución cuenta al menos 1 minuto; por eso son 30 minutos y no 15 o 20 (48 ejecuciones al día ≈ 1.440 min al mes).
 - Si la API de EPM rechazara las IPs de GitHub, el job fallaría de forma visible y se avisaría por Telegram.
 
@@ -183,7 +267,8 @@ Variables de entorno (`.env` o entorno): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID
 
 - El código y la rama `state` son visibles para todos. La rama contiene solo ids de ofertas, un contador de Telegram y una fecha; los **suscriptores y chats van cifrados** (AES-256-CBC con PBKDF2) con `STATE_KEY`.
 - Los **Secrets no son visibles** y no se pasan a *forks* ni a *pull requests* de terceros.
-- Los **logs de Actions también son públicos**: por eso el script no imprime tokens ni chat ids completos (solo `***` y los 3 últimos dígitos).
+- Los **logs de Actions también son públicos**: por eso el script no imprime tokens ni chat ids completos (solo `***` y los 3 últimos dígitos). La update de Telegram tampoco pasa por `env:` (GitHub imprime ese bloque en el log): el script la lee del archivo del evento. Se verificó que los logs no contienen tokens, claves ni ids ni textos de usuarios.
+- La URL del Worker no es un secreto, pero solo acepta peticiones con el header secreto correcto (cualquier otra recibe 401).
 
 ## Uso del bot: perfiles, suscripciones y comandos
 
@@ -205,11 +290,11 @@ Hay dos tipos de chats:
 
 ### Comandos de Telegram
 Escríbele al bot: `/comandos` (menú), `/ofertas` (todas), `/perfiles`, `/suscribir`, `/sistemas` (ofertas abiertas de un perfil), `/ayuda`.
-Con GitHub Actions los comandos y botones se atienden en cada ejecución (cada ~30 min). Si necesitas respuesta inmediata, usa `node epm-notifier.mjs --listen` (proceso siempre activo, ver abajo).
+Con el webhook activo los comandos y botones se atienden en ~15–30 s (ver [Respuesta rápida](#respuesta-rápida-con-cloudflare-worker)). Sin webhook se atienden en cada ejecución del cron (~30 min), o al instante con `node epm-notifier.mjs --listen` (proceso siempre activo; no funciona mientras haya un webhook registrado).
 
 ## Alternativas de despliegue
 
-GitHub Actions es la forma recomendada. Estas alternativas guardan su propio estado local (no lo comparten con la rama `state`): **no las uses a la vez que el workflow con el mismo bot**, porque se pelean por los mensajes de Telegram y duplican avisos. Si pruebas una, desactiva antes el workflow (Actions → EPM Notifier → *Disable workflow*).
+GitHub Actions es la forma recomendada. Estas alternativas guardan su propio estado local (no lo comparten con la rama `state`): **no las uses a la vez que el workflow con el mismo bot**, porque se pelean por los mensajes de Telegram y duplican avisos. Si pruebas una, desactiva antes el workflow (Actions → EPM Notifier → *Disable workflow*) y el webhook (`node epm-notifier.mjs --delete-webhook`).
 
 ### Cron local (cada 20 min)
 ```cron
@@ -233,4 +318,10 @@ kubectl logs job/epm-notifier-test
 El PVC (`/data/seen.json`) evita que lleguen ofertas repetidas tras cada ejecución. Con `local-path` (RWO) el job debe correr en el mismo nodo; `concurrencyPolicy: Forbid` evita solapes. Para responder a comandos y botones al instante, aplica `k8s/deployment.yaml` (ejecuta `--listen`: responde al momento y revisa ofertas cada 20 min) en lugar del CronJob.
 
 ## Seguridad
-El token solo vive en GitHub Secrets (o en `.env` para pruebas locales). `.env` y `seen.json*` están en `.gitignore`: el estado nunca va a la rama `main`, solo a `state`. Los logs enmascaran el token y los chat ids. Si sospechas que el token se filtró, revócalo con @BotFather (`/revoke`) y actualiza el Secret.
+El token solo vive en GitHub Secrets (o en `.env` para pruebas locales). `.env` y `seen.json*` están en `.gitignore`: el estado nunca va a la rama `main`, solo a `state`. Los logs enmascaran el token y los chat ids. Si sospechas que el token se filtró, revócalo con @BotFather (`/revoke`) y actualiza el Secret. El token de GitHub del Worker es *fine-grained*, limitado a este repositorio, con el permiso mínimo (Contents: Read and write) y caducidad corta; los secretos del Worker se cargan con `wrangler secret put` y nunca van en el repositorio.
+
+## Historial de cambios
+
+- **2026-10-24 — Respuesta rápida con Cloudflare Worker.** Se agregó un Worker de Cloudflare que recibe el webhook de Telegram y dispara el workflow con `repository_dispatch`: los comandos y botones pasan de responder en hasta ~30 minutos a **~15–30 segundos**, sin costo. El estado se guarda ahora de forma transaccional (una ejecución por update, reintento ante conflictos y deduplicación por `update_id`), y el cron de 30 minutos queda como respaldo y para los avisos de ofertas nuevas. Los logs de Actions ya no incluyen ids de chat ni comandos de usuarios.
+- **2026-10-24 — Ejecución con GitHub Actions.** El bot dejó de depender de un computador encendido: corre en GitHub Actions cada 30 minutos y guarda el estado en la rama `state` (suscriptores y chats cifrados).
+- **2026-10-24 — Suscripciones públicas y perfiles por cargo.** Cualquier persona puede consultar y suscribirse a todas las ofertas o a perfiles concretos; menú con botones, administración de grupos y aviso legal.
