@@ -577,6 +577,8 @@ async function handleCommand(cmd, chatId, ctx = {}) {
         '🎯 <b>Perfiles</b> — filtrar por tu carrera (sistemas, civil, financiera…) o por cargo (profesional, tecnólogo, técnico…) y saber si hay algo para ti',
         '🔔 <b>Suscribirme</b> — recibir un aviso automático (cargo, ubicación, requisitos y enlace) cuando EPM publique ofertas nuevas, de todo o solo de tus perfiles',
         '❓ <b>Ayuda</b> — lista de comandos',
+        '',
+        'ℹ️ <i>Proyecto personal y educativo, no oficial ni afiliado a EPM. Las postulaciones se hacen en la página de empleo de EPM.</i>',
       ].join('\n'),
       chatId,
       mainMenu(),
@@ -645,6 +647,13 @@ async function registerCommands() {
   commandsRegistered = true;
   try {
     botName = ((await tgCall('getMe', {})).result?.username || '').toLowerCase();
+    // Texto que se ve en el chat vacío (sobre el botón "Iniciar") y en el perfil del bot.
+    await tgCall('setMyDescription', {
+      description:
+        '👋 Escribe /start para activar las notificaciones y ver las ofertas de empleo de EPM.\n\n' +
+        'Proyecto personal y educativo, no oficial: no está afiliado a EPM. Las postulaciones se hacen siempre en la página de empleo de EPM.',
+    });
+    await tgCall('setMyShortDescription', { short_description: 'Avisos de ofertas de empleo de EPM. Proyecto personal, no oficial.' });
     await tgCall('setMyCommands', {
       commands: [
         { command: 'comandos', description: 'Menú con botones' },
