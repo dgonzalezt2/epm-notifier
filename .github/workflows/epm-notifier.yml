@@ -33,8 +33,9 @@ jobs:
         with:
           node-version: "20"
 
-      # Los secretos solo se pasan a este paso. El contenido de la update (texto de un usuario) llega por una
-      # variable de entorno y NUNCA se interpola dentro del `run:`, para evitar inyección de comandos.
+      # Los secretos solo se pasan a este paso. La update (chat ids y texto de un usuario) NO se pasa por `env:` ni
+      # se interpola en el `run:`: GitHub imprime el bloque env en los logs (públicos) y la interpolación permitiría
+      # inyección de comandos. El script la lee del archivo del evento ($GITHUB_EVENT_PATH).
       - name: Ejecutar notificador
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -47,6 +48,5 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           KEYWORDS: ${{ vars.KEYWORDS }}
           PERFIL: ${{ vars.PERFIL }}
-          TG_UPDATE: ${{ github.event_name == 'repository_dispatch' && toJSON(github.event.client_payload.update) || '' }}
           STATE_FILE: ${{ github.workspace }}/run/seen.json
         run: bash scripts/epm-run.sh

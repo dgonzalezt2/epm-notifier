@@ -875,11 +875,15 @@ async function pollCommands(timeout = 0) {
 // Una ejecución por update: procesa la que llega en TG_UPDATE y deja las respuestas en OUTBOX_FILE.
 // scripts/epm-run.sh guarda el estado y, solo si el push funcionó, ejecuta --flush-outbox.
 async function runWebhook() {
+  // En Actions la update viene en el archivo del evento (no en variables de entorno: GitHub imprime el env en los logs).
+  // TG_UPDATE queda solo para pruebas locales.
   let raw;
   try {
-    raw = JSON.parse(process.env.TG_UPDATE || '');
+    raw = process.env.TG_UPDATE
+      ? JSON.parse(process.env.TG_UPDATE)
+      : JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH || '', 'utf8')).client_payload?.update;
   } catch {
-    throw new Error('TG_UPDATE ausente o no es JSON válido');
+    throw new Error('No se pudo leer la update (GITHUB_EVENT_PATH / TG_UPDATE ausente o inválido)');
   }
   const clean = sanitizeUpdate(raw);
   const outFile = process.env.OUTBOX_FILE || resolve(dirname(cfg.stateFile), 'outbox.json');

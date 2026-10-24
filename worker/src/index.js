@@ -69,9 +69,11 @@ async function sameSecret(a, b) {
   return crypto.subtle.timingSafeEqual(ha, hb);
 }
 
-// Devuelve true si GitHub aceptó el evento (204). Un reintento solo ante fallos de red, 5xx o 429.
+// Devuelve { ok, status, message }. ok = GitHub aceptó el evento (204). Un reintento solo ante fallos de red, 5xx o 429.
+// status/message (códigos HTTP y texto público de GitHub, nunca secretos) sirven para diagnosticar un 502.
 async function dispatch(env, update) {
   const url = `${env.GITHUB_API || 'https://api.github.com'}/repos/${env.GITHUB_REPO}/dispatches`;
+  let last = { ok: false, status: 0, message: 'sin respuesta de GitHub' };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await fetch(url, {
@@ -86,13 +88,20 @@ async function dispatch(env, update) {
         body: JSON.stringify({ event_type: 'telegram_update', client_payload: { update } }),
         signal: AbortSignal.timeout(8000),
       });
-      if (res.status === 204) return true;
-      if (res.status < 500 && res.status !== 429) return false; // 401/403/404/422: reintentar no sirve
+      if (res.status === 204) return { ok: true, status: 204, message: '' };
+      let message = '';
+      try {
+        message = String((await res.json()).message || '').slice(0, 120);
+      } catch {
+        // cuerpo no JSON
+      }
+      last = { ok: false, status: res.status, message };
+      if (res.status < 500 && res.status !== 429) return last; // 401/403/404/422: reintentar no sirve
     } catch {
-      // red caída o timeout: se reintenta una vez
+      last = { ok: false, status: 0, message: 'red caída o timeout' };
     }
   }
-  return false;
+  return last;
 }
 
 const reply = (status, body = '') => new Response(body, { status, headers: status === 405 ? { Allow: 'POST' } : undefined });
@@ -126,6 +135,7 @@ export default {
     if (limited(chatId, Date.now())) return reply(200, 'rate-limited');
 
     // 5) Se ESPERA a GitHub: si falla se responde 502 y Telegram reintenta la entrega (el script deduplica por update_id).
-    return (await dispatch(env, slim)) ? reply(200, 'ok') : reply(502);
+    const r = await dispatch(env, slim);
+    return r.ok ? reply(200, 'ok') : reply(502, `dispatch failed: HTTP ${r.status} ${r.message}`.trim());
   },
 };
