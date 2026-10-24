@@ -1,0 +1,40 @@
+# Alternativa al CronJob: proceso siempre activo que responde a /sistemas, /ofertas, etc.
+# al instante y revisa ofertas nuevas cada 20 min. Usa UNO de los dos (CronJob o Deployment),
+# nunca ambos: comparten el PVC y el estado.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: epm-notifier
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # el PVC es RWO
+  selector:
+    matchLabels:
+      app: epm-notifier
+  template:
+    metadata:
+      labels:
+        app: epm-notifier
+    spec:
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: notifier
+          image: epm-notifier:latest
+          imagePullPolicy: IfNotPresent
+          args: ["epm-notifier.mjs", "--listen"]
+          command: ["node"]
+          envFrom:
+            - secretRef:
+                name: epm-notifier
+          env:
+            - name: STATE_FILE
+              value: /data/seen.json
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: epm-notifier-data

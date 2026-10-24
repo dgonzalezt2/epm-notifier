@@ -1,0 +1,4 @@
+.env
+seen.json*
+k8s/secret.yaml
+node_modules/

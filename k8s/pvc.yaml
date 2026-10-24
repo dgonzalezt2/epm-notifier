@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: epm-notifier-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path # default de K3s
+  resources:
+    requests:
+      storage: 50Mi
