@@ -197,10 +197,10 @@ async function withRetry(label, fn, tries = 3) {
   throw last;
 }
 
-async function httpJson(url, opts) {
+async function httpJson(url, opts, timeoutMs = 30000) {
   let res;
   try {
-    res = await fetch(url, { ...opts, signal: AbortSignal.timeout(30000) });
+    res = await fetch(url, { ...opts, signal: AbortSignal.timeout(timeoutMs) });
   } catch (e) {
     throw Object.assign(new Error(`red: ${e.cause?.code || e.message}`), { retryable: true });
   }
@@ -218,9 +218,9 @@ async function httpJson(url, opts) {
 }
 
 // ---------- API EPM ----------
-async function apiGet(path, mockName) {
+async function apiGet(path, mockName, { tries = 3, timeout = 30000 } = {}) {
   if (MOCK) return JSON.parse(readFileSync(resolve(MOCK, mockName), 'utf8'));
-  return withRetry('EPM', () => httpJson(`${API}/${path}`, { headers: { accept: 'application/json' } }));
+  return withRetry('EPM', () => httpJson(`${API}/${path}`, { headers: { accept: 'application/json' } }, timeout), tries);
 }
 
 async function fetchListing() {
@@ -251,14 +251,142 @@ async function fetchDetail(id) {
   return data?.items?.[0] ?? null;
 }
 
-// ---------- mensaje ----------
+// Detalle sin reintentos y con timeout corto: lo usa el botón de ofertas, que no debe quedarse esperando a EPM.
+async function fetchDetailQuick(id) {
+  const data = await apiGet(
+    `recruitingCEJobRequisitionDetails?expand=all&onlyData=true&finder=ById;Id=%22${encodeURIComponent(id)}%22,siteNumber=${SITE}`,
+    `detail-${id}.json`,
+    { tries: 1, timeout: 8000 },
+  );
+  return data?.items?.[0] ?? null;
+}
+
+// ---------- ofertas: datos, fechas y formato ----------
+// Una sola función de formato (formatOffer) sirve al aviso de oferta nueva (cron) y al botón de ofertas.
+// El contenido de EPM es externo y no confiable: se limpia, se acota y se escapa antes de ir a Telegram.
+const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const BOGOTA_OFFSET_MS = -5 * 3600 * 1000; // Colombia no tiene horario de verano: America/Bogota = UTC-5 todo el año
+
+// Día de calendario en Bogotá de un instante (ISO con zona). null si no es una fecha válida.
+function bogotaDay(iso) {
+  const ms = typeof iso === 'number' ? iso : Date.parse(iso);
+  if (!Number.isFinite(ms)) return null;
+  const t = new Date(ms + BOGOTA_OFFSET_MS);
+  return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() };
+}
+// PostedDate del listado es solo "AAAA-MM-DD": ya es una fecha de calendario, no se desplaza.
+function plainDay(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s ?? ''));
+  return m ? { y: +m[1], m: +m[2], d: +m[3] } : null;
+}
+const fmtDay = (x) => (x ? `${x.d} ${MONTHS[x.m - 1]} ${x.y}` : null);
+const dayNumber = (x) => Math.floor(Date.UTC(x.y, x.m - 1, x.d) / 86400000);
+const isoOrNull = (s) => (Number.isFinite(Date.parse(s)) ? new Date(Date.parse(s)).toISOString() : null);
+
+// Línea y estado del cierre. `end` es el instante real (p. ej. 2026-10-28T04:59:00Z = 27 oct 23:59 en Bogotá).
+function closing(endIso, now = Date.now()) {
+  const end = Date.parse(endIso);
+  if (!Number.isFinite(end)) return { closed: false, line: '⏰ Cierra: No especificada' };
+  const date = fmtDay(bogotaDay(end));
+  if (now > end) return { closed: true, line: `⏰ Cerrada el ${date}` };
+  const diff = dayNumber(bogotaDay(end)) - dayNumber(bogotaDay(now));
+  const when = diff <= 0 ? 'cierra hoy' : diff === 1 ? 'cierra mañana' : `en ${diff} días`;
+  return { closed: false, line: `⏰ Cierra: ${date} (${when})` };
+}
+const isClosedLite = (lite, now = Date.now()) => !!lite?.end && now > Date.parse(lite.end);
+
+// Recorta en frontera de palabra con "…". Trabaja sobre texto SIN escapar (se escapa después), así nunca se parte una entidad.
+function clipWord(s, n) {
+  s = String(s ?? '');
+  if (s.length <= n) return s;
+  let cut = s.slice(0, n - 1);
+  const sp = cut.lastIndexOf(' ');
+  if (sp > n * 0.6) cut = cut.slice(0, sp);
+  cut = cut.replace(/[\s,;:.\-–—(]+$/, '');
+  if (/[\ud800-\udbff]$/.test(cut)) cut = cut.slice(0, -1); // no dejar medio carácter emoji
+  return cut + '…';
+}
+
+// Audiencia. EPM no tiene un campo interno/externo: se usa el tipo de requisición (explícito) y, si no basta,
+// la frase "Público objetivo" del texto de la oferta (heurística; se muestra el fragmento literal).
+const SECTION_END = /(licencias requeridas|certificaciones requeridas|matr[ií]culas requeridas|conocimientos requeridos|observaciones generales)/i;
+const SERVERS_RE = /\bservidor(?:es|as?)?\b/;
+const OPEN_RE = /abiert[oa]s? a la comunidad|publico en general|convocatoria externa|cualquier persona|personas externas/;
+const OTHER_CO_RE = /\b(chec|essa|cens|edeq)\b/;
+function classifyAudience(d) {
+  if (norm(d?.RequisitionType) === 'privado') return { label: 'Por invitación (proceso privado)', snippet: '' };
+  const text = htmlToText(d?.ExternalDescriptionStr).replace(/\s+/g, ' ');
+  const m = /p[uú]blico objetivo\s*:?\s*[-–]?\s*(.*)/i.exec(text);
+  let clause = m ? m[1] : '';
+  const end = SECTION_END.exec(clause);
+  if (end) clause = clause.slice(0, end.index);
+  clause = clause.replace(/^(?:este proceso es\s+)?dirigid[oa]\s+a\s*:?\s*/i, '').replace(/^[-–:;\s]+/, '').replace(/[-–:;\s]+$/, '').trim();
+  if (!clause) return { label: 'No determinado', snippet: '' };
+  const snippet = clipWord(scrub(clause), 80);
+  const n = norm(clause);
+  const servers = SERVERS_RE.test(n);
+  const open = OPEN_RE.test(n);
+  if (servers && !open) {
+    return OTHER_CO_RE.test(n) && !/\bepm\b/.test(n) ? { label: 'No determinado', snippet } : { label: 'Servidores de EPM', snippet };
+  }
+  if (open && !servers) return { label: 'Público general', snippet };
+  return { label: 'No determinado', snippet };
+}
+
+// Datos públicos que se guardan por oferta (sin descripción larga): fechas con zona y audiencia.
+function liteFromDetail(d) {
+  if (!d) return null;
+  return {
+    type: String(d.RequisitionType ?? '').slice(0, 20),
+    start: isoOrNull(d.ExternalPostedStartDate),
+    end: isoOrNull(d.ExternalPostedEndDate),
+    aud: classifyAudience(d),
+  };
+}
+// El archivo de caché es entrada no confiable: solo se aceptan tipos y tamaños esperados.
+function cleanLite(x) {
+  if (!x || typeof x !== 'object' || !x.aud || typeof x.aud.label !== 'string') return null;
+  return {
+    type: String(x.type ?? '').slice(0, 20),
+    start: isoOrNull(x.start),
+    end: isoOrNull(x.end),
+    aud: { label: x.aud.label.slice(0, 60), snippet: String(x.aud.snippet ?? '').slice(0, 120) },
+  };
+}
+
+const JOB_ID_RE = /^\d{1,12}$/;
+const jobUrl = (id) => (JOB_ID_RE.test(String(id)) ? `${HOST}/hcmUI/CandidateExperience/es/sites/${SITE}/job/${id}` : null);
+const escAttr = (s) => esc(s).replace(/"/g, '&quot;');
+
+// Texto externo -> una línea limpia: sin caracteres de control ni espacios repetidos.
+const scrub = (s) => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim();
+
+function summarize(job, d) {
+  const t = scrub(htmlToText(d?.ShortDescriptionStr || job?.ShortDescriptionStr)).replace(/^funci[oó]n b[aá]sica\s*:\s*/i, '');
+  return t ? clipWord(t, 350) : '';
+}
+
+// Tarjeta de una oferta (HTML de Telegram). `lite` puede ser null si el detalle no estuvo disponible.
+function formatOffer(job, lite, { isNew = false, now = Date.now(), detail = null } = {}) {
+  const title = clipWord(scrub(job?.Title) || 'Oferta sin título', 120);
+  const url = jobUrl(job?.Id);
+  const head = (isNew ? '🆕 ' : '') + (url ? `<a href="${escAttr(url)}">${esc(title)}</a>` : `<b>${esc(title)}</b>`);
+  const aud = lite?.aud || { label: 'No determinado', snippet: '' };
+  const audLine = `👥 Dirigida a: ${esc(aud.label)}${aud.snippet ? ` — «${esc(aud.snippet)}»` : ''}`;
+  const loc = clipWord(scrub(job?.PrimaryLocation ?? detail?.PrimaryLocation), 100) || 'No especificada';
+  const published = (lite?.start ? fmtDay(bogotaDay(lite.start)) : fmtDay(plainDay(job?.PostedDate))) || 'No especificada';
+  const c = lite?.end ? closing(lite.end, now) : { line: '⏰ Cierra: No especificada' };
+  const desc = summarize(job, detail) || 'Descripción no disponible';
+  return [head, audLine, `📍 ${esc(loc)}`, `📅 Publicada: ${published} · ${c.line}`, esc(desc)].join('\n');
+}
+
+// ---------- mensaje de oferta nueva ----------
 const flex = (d, re) =>
   (d?.requisitionFlexFields || []).find((f) => re.test(norm(f.Prompt)) && f.Value)?.Value;
 
-function buildMessage(job, d) {
-  const url = `${HOST}/hcmUI/CandidateExperience/es/sites/${SITE}/job/${encodeURIComponent(job.Id)}`;
-  const desc = htmlToText(d?.ExternalDescriptionStr) || htmlToText(d?.ShortDescriptionStr || job.ShortDescriptionStr);
-  const summary = clip(htmlToText(d?.ShortDescriptionStr || job.ShortDescriptionStr) || desc, 900);
+// Misma tarjeta que el botón + lo que ya traía el aviso: salario, contrato y requisitos.
+function buildMessage(job, d, now = Date.now()) {
+  const card = formatOffer(job, liteFromDetail(d), { isNew: true, now, detail: d });
 
   const reqs = [];
   const quals = htmlToText(d?.ExternalQualificationsStr);
@@ -267,36 +395,110 @@ function buildMessage(job, d) {
   const exp = flex(d, /^experiencia requerida/);
   if (titulo) reqs.push(`Título: ${htmlToText(titulo).replace(/\n+/g, ' ')}`);
   if (exp) reqs.push(`Experiencia: ${htmlToText(exp).replace(/\n+/g, ' ')}`);
-  const reqText = clip(reqs.join('\n'), 1200);
+  const reqRaw = reqs.join('\n');
 
   const extra = [];
   const salario = flex(d, /^salario/);
   const contrato = flex(d, /tipo de contrato/);
-  if (salario) extra.push(`Salario: ${salario}`);
-  if (contrato) extra.push(`Contrato: ${contrato}`);
-  const cierre = d?.ExternalPostedEndDate?.slice(0, 10);
-  if (cierre) extra.push(`Cierra: ${cierre}`);
+  if (salario) extra.push(`Salario: ${clipWord(String(salario), 60)}`);
+  if (contrato) extra.push(`Contrato: ${clipWord(String(contrato), 60)}`);
+  const extraTxt = extra.length ? `💼 ${esc(extra.join(' · '))}` : '';
 
-  const parts = [
-    `🆕 <b>${esc(job.Title)}</b>`,
-    `📍 ${esc(job.PrimaryLocation || d?.PrimaryLocation || 'N/D')}`,
-    `📅 Publicada: ${esc(job.PostedDate || d?.ExternalPostedStartDate?.slice(0, 10) || 'N/D')}`,
-  ];
-  if (extra.length) parts.push(esc(extra.join(' · ')));
-  if (summary) parts.push('', `<b>Resumen</b>\n${esc(summary)}`);
-  if (reqText) parts.push('', `<b>Requisitos</b>\n${esc(reqText)}`);
-  const link = `\n🔗 <a href="${esc(url)}">Ver oferta</a>`;
-
-  let msg = parts.join('\n') + '\n' + link;
-  if (msg.length > MAX_MSG) {
-    // recorta la sección más larga hasta caber (el escape ya está aplicado, recortamos antes de escapar)
-    const over = msg.length - MAX_MSG + 20;
-    const trimmed = clip(summary, Math.max(100, summary.length - over));
-    parts[parts.findIndex((p) => p.startsWith('<b>Resumen</b>'))] = `<b>Resumen</b>\n${esc(trimmed)}`;
-    msg = parts.join('\n') + '\n' + link;
-    if (msg.length > MAX_MSG) msg = parts.slice(0, 4).join('\n') + '\n' + link;
+  const build = (reqLimit) => {
+    const req = reqRaw && reqLimit > 0 ? `<b>Requisitos</b>\n${esc(clipWord(reqRaw, reqLimit))}` : '';
+    return [card, extraTxt, req].filter(Boolean).join('\n\n');
+  };
+  let limit = 1200;
+  let msg = build(limit);
+  while (msg.length > MAX_MSG && limit > 0) {
+    limit -= 200;
+    msg = build(limit);
   }
-  return msg;
+  return msg.length > MAX_MSG ? card : msg;
+}
+
+// ---------- caché de datos públicos de ofertas (<STATE_FILE>.offers) ----------
+// El cron la rellena (detalle de cada oferta); el botón de ofertas solo la lee y pide el detalle de lo que falte.
+const offersFile = `${cfg.stateFile}.offers`;
+function loadOffers() {
+  try {
+    const o = JSON.parse(readFileSync(offersFile, 'utf8'));
+    return o && typeof o.offers === 'object' && o.offers ? o.offers : {};
+  } catch {
+    return {};
+  }
+}
+function saveOffers(map) {
+  const tmp = `${offersFile}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ updated: new Date().toISOString(), offers: map }));
+  renameSync(tmp, offersFile);
+}
+
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      for (;;) {
+        const k = next++;
+        if (k >= items.length) return;
+        out[k] = await fn(items[k], k);
+      }
+    }),
+  );
+  return out;
+}
+
+// Botón de ofertas (solo lectura): caché + detalle bajo demanda de lo que falte (acotado y sin persistir).
+async function liteFor(jobs, { max = 20 } = {}) {
+  const cache = loadOffers();
+  const out = new Map();
+  const missing = [];
+  for (const j of jobs) {
+    const c = cleanLite(cache[String(j.Id)]);
+    if (c) out.set(String(j.Id), c);
+    else missing.push(j);
+  }
+  await mapLimit(missing.slice(0, max), 5, async (j) => {
+    try {
+      out.set(String(j.Id), liteFromDetail(await fetchDetailQuick(j.Id)));
+    } catch (e) {
+      logErr(`Detalle ${j.Id} no disponible: ${e.message}`); // el mensaje sale igual, con "No determinado"/"No especificada"
+    }
+  });
+  return out;
+}
+
+// Cron: mantiene la caché al día (poda las ofertas que ya no están y rellena en silencio las que faltan, sin avisar).
+async function refreshOffers(jobs, fetched = new Map()) {
+  const cache = loadOffers();
+  const ids = new Set(jobs.map((j) => String(j.Id)));
+  let changed = false;
+  for (const k of Object.keys(cache)) {
+    if (!ids.has(k)) {
+      delete cache[k];
+      changed = true;
+    }
+  }
+  const missing = jobs.filter((j) => !fetched.has(String(j.Id)) && !cleanLite(cache[String(j.Id)])).slice(0, 30);
+  await mapLimit(missing, 4, async (j) => {
+    try {
+      const lite = liteFromDetail(await fetchDetail(j.Id));
+      if (lite) {
+        cache[String(j.Id)] = lite;
+        changed = true;
+      }
+    } catch (e) {
+      logErr(`Detalle ${j.Id} no disponible para la caché: ${e.message}`);
+    }
+  });
+  for (const [id, lite] of fetched) {
+    if (lite) {
+      cache[id] = lite;
+      changed = true;
+    }
+  }
+  if (changed) saveOffers(cache);
 }
 
 // ---------- Telegram ----------
@@ -484,20 +686,31 @@ const areaProfiles = () => Object.keys(PROFILES).filter((p) => !CARGO_PROFILES.i
 const backMenu = () => [[btn('🎯 Perfiles', 'perfiles'), btn('⬅️ Menú', 'comandos')]];
 
 async function replyListing(chatId, label, jobs) {
-  if (!jobs.length) {
-    return sendTelegram(`No hay ofertas abiertas para <b>${esc(label)}</b> en este momento.`, chatId, backMenu());
+  const lites = await liteFor(jobs);
+  const now = Date.now();
+  const open = jobs.filter((j) => !isClosedLite(lites.get(String(j.Id)), now));
+  const closed = jobs.length - open.length;
+  const note = closed ? `\nℹ️ ${closed} oferta(s) cerrada(s) no se muestran.` : '';
+  if (!open.length) {
+    return sendTelegram(`No hay ofertas abiertas para <b>${esc(label)}</b> en este momento.${note}`, chatId, backMenu());
   }
-  let msg = `📋 <b>${esc(label)}</b>: ${jobs.length} oferta(s) abierta(s)\n`;
-  for (const j of jobs) {
-    const url = `${HOST}/hcmUI/CandidateExperience/es/sites/${SITE}/job/${encodeURIComponent(j.Id)}`;
-    const line = `\n• <a href="${esc(url)}">${esc(j.Title)}</a>\n   📍 ${esc(j.PrimaryLocation || 'N/D')} · 📅 ${esc(j.PostedDate || 'N/D')}\n`;
-    if (msg.length + line.length > MAX_MSG) {
+  let msg = `📋 <b>${esc(label)}</b>: ${open.length} oferta(s) abierta(s)\n`;
+  for (const j of open) {
+    const card = '\n' + formatOffer(j, lites.get(String(j.Id)), { now }) + '\n';
+    if (msg.length + card.length > MAX_MSG) {
+      await sendTelegram(msg, chatId); // los mensajes se parten entre ofertas: nunca se corta un enlace
+      msg = '';
+    }
+    msg += card;
+  }
+  if (note) {
+    if (msg.length + note.length > MAX_MSG) {
       await sendTelegram(msg, chatId);
       msg = '';
     }
-    msg += line;
+    msg += note;
   }
-  if (msg) await sendTelegram(msg, chatId, backMenu());
+  await sendTelegram(msg, chatId, backMenu());
 }
 
 // ---------- suscripciones: cualquiera puede suscribirse y elegir qué avisos recibir ----------
@@ -1049,33 +1262,46 @@ async function checkNew() {
     await sendTelegram(`✅ <b>Notificador EPM activo</b>\nOfertas actuales registradas sin notificar: ${jobs.length}.`);
     saveState(seen);
     log(`Primera ejecución: ${jobs.length} ofertas registradas.`);
+    await refreshOffers(jobs).catch((e) => logErr('Caché de ofertas no actualizada:', e.message)); // pasada silenciosa
     return;
   }
 
   const fresh = jobs.filter((j) => !seen.has(String(j.Id)));
   log(`Listado: ${jobs.length} ofertas, ${fresh.length} nuevas.`);
+  const fetched = new Map();
   let failed = null;
-  for (const job of fresh) {
-    try {
-      const recipients = recipientsFor(job);
-      if (recipients.length) {
-        let detail = null;
-        try {
-          detail = await fetchDetail(job.Id);
-        } catch (e) {
-          logErr(`Detalle ${job.Id} no disponible, uso datos del listado: ${e.message}`);
+  try {
+    for (const job of fresh) {
+      try {
+        const recipients = recipientsFor(job);
+        if (recipients.length) {
+          let detail = null;
+          try {
+            detail = await fetchDetail(job.Id);
+          } catch (e) {
+            logErr(`Detalle ${job.Id} no disponible, uso datos del listado: ${e.message}`);
+          }
+          const lite = liteFromDetail(detail);
+          if (lite) fetched.set(String(job.Id), lite);
+          if (isClosedLite(lite)) {
+            log(`Omitida (ya cerrada) ${job.Id}: ${job.Title}`); // no se presenta como disponible
+          } else {
+            const delivered = await deliver(buildMessage(job, detail), recipients);
+            log(`Notificada ${job.Id} a ${delivered}/${recipients.length}: ${job.Title}`);
+          }
+        } else {
+          log(`Sin destinatarios ${job.Id}: ${job.Title}`);
         }
-        const delivered = await deliver(buildMessage(job, detail), recipients);
-        log(`Notificada ${job.Id} a ${delivered}/${recipients.length}: ${job.Title}`);
-      } else {
-        log(`Sin destinatarios ${job.Id}: ${job.Title}`);
+        seen.add(String(job.Id));
+        saveState(seen); // guarda tras cada oferta: un fallo a medias no genera duplicados
+      } catch (e) {
+        failed = e; // no se marca como vista: se reintenta en la próxima ejecución
+        break;
       }
-      seen.add(String(job.Id));
-      saveState(seen); // guarda tras cada oferta: un fallo a medias no genera duplicados
-    } catch (e) {
-      failed = e; // no se marca como vista: se reintenta en la próxima ejecución
-      break;
     }
+  } finally {
+    // Caché de datos públicos (audiencia y fechas): incluye las ofertas ya vistas que aún no la tenían (sin avisar).
+    await refreshOffers(jobs, fetched).catch((e) => logErr('Caché de ofertas no actualizada:', e.message));
   }
   if (failed) throw failed;
 }

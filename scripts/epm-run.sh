@@ -24,9 +24,10 @@ MAX_ATTEMPTS="${MAX_ATTEMPTS:-8}"
 TMP="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 EVENT="${GITHUB_EVENT_NAME:-schedule}"
 
-PLAIN_FILES="seen.json seen.json.tgoffset seen.json.applied"
+PLAIN_FILES="seen.json seen.json.tgoffset seen.json.applied seen.json.offers"
 ENC_FILES="seen.json.subs seen.json.chats"
-CRON_OWNED="seen.json seen.json.tgoffset last_run"
+# seen.json.offers (datos públicos de las ofertas: audiencia y fechas) solo lo escribe el cron; los webhooks lo leen.
+CRON_OWNED="seen.json seen.json.tgoffset seen.json.offers last_run"
 
 export STATE_FILE="${STATE_FILE:-$PWD/$RUN_DIR/seen.json}"
 export OUTBOX_FILE="${OUTBOX_FILE:-$PWD/$RUN_DIR/outbox.json}"
@@ -95,6 +96,7 @@ commit_state() {
       "- seen.json: ids de ofertas ya vistas." \
       "- seen.json.tgoffset: último mensaje de Telegram leído (modo sin webhook)." \
       "- seen.json.applied: últimos update_id aplicados (evita aplicar dos veces un cambio)." \
+      "- seen.json.offers: datos públicos de cada oferta (audiencia y fechas), para el botón de ofertas." \
       "- *.enc: suscriptores y chats, cifrados." \
       "- last_run: fecha de la última ejecución." \
       >"$STATE_DIR/README.md"
