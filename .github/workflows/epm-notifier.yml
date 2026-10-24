@@ -1,0 +1,123 @@
+name: EPM Notifier
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+# Escribe solo en la rama `state` (estado del bot); el código de `main` no se toca.
+permissions:
+  contents: write
+
+# Nunca dos ejecuciones a la vez: comparten el estado y la lectura de mensajes de Telegram.
+concurrency:
+  group: epm-notifier
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # El estado vive en la rama huérfana `state`:
+      #   seen.json, seen.json.tgoffset  -> en claro (solo ids de ofertas y un contador)
+      #   seen.json.subs.enc / .chats.enc -> CIFRADOS con STATE_KEY (contienen chat ids de personas)
+      # El repositorio es público, por eso los chat ids nunca se guardan sin cifrar.
+      - name: Restaurar estado (rama state)
+        env:
+          STATE_KEY: ${{ secrets.STATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${STATE_KEY:-}" ]; then
+            echo "::error::Falta el secret STATE_KEY (clave para cifrar suscriptores y chats). Ver README."
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --heads origin state >/dev/null 2>&1; then
+            git fetch --depth=1 origin state
+            git worktree add -B state state-data FETCH_HEAD
+          else
+            echo "La rama 'state' no existe: se crea vacía (primera ejecución)."
+            git worktree add --detach state-data
+            git -C state-data checkout --orphan state
+            git -C state-data rm -rf --quiet . || true
+          fi
+
+          mkdir -p run
+          for f in seen.json seen.json.tgoffset; do
+            if [ -f "state-data/$f" ]; then cp "state-data/$f" "run/$f"; fi
+          done
+          for f in seen.json.subs seen.json.chats; do
+            if [ -f "state-data/$f.enc" ]; then
+              openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:STATE_KEY \
+                -in "state-data/$f.enc" -out "run/$f" \
+                || { echo "::error::No se pudo descifrar $f (¿STATE_KEY distinta a la usada al guardar?)"; exit 1; }
+            fi
+          done
+
+      # Los secretos del bot solo se pasan a este paso.
+      - name: Ejecutar notificador
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          KEYWORDS: ${{ vars.KEYWORDS }}
+          PERFIL: ${{ vars.PERFIL }}
+          STATE_FILE: ${{ github.workspace }}/run/seen.json
+        run: node epm-notifier.mjs
+
+      # Solo se llega aquí si el script terminó bien (código 0): un fallo nunca guarda estado a medias.
+      - name: Guardar estado (rama state)
+        env:
+          STATE_KEY: ${{ secrets.STATE_KEY }}
+        run: |
+          set -euo pipefail
+          for f in seen.json seen.json.tgoffset; do
+            if [ -f "run/$f" ]; then cp "run/$f" "state-data/$f"; fi
+          done
+
+          # Se vuelve a cifrar solo si el contenido cambió (el cifrado usa sal aleatoria: evita commits inútiles).
+          for f in seen.json.subs seen.json.chats; do
+            [ -f "run/$f" ] || continue
+            if [ -f "state-data/$f.enc" ] \
+              && openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:STATE_KEY \
+                   -in "state-data/$f.enc" -out "$RUNNER_TEMP/previous" 2>/dev/null \
+              && cmp -s "$RUNNER_TEMP/previous" "run/$f"; then
+              continue
+            fi
+            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:STATE_KEY \
+              -in "run/$f" -out "state-data/$f.enc"
+          done
+          rm -f "$RUNNER_TEMP/previous"
+
+          # Latido diario: mantiene actividad en el repo para que GitHub no desactive el schedule (60 días sin actividad).
+          date -u +%F > state-data/last_run
+          if [ ! -f state-data/README.md ]; then
+            printf '%s\n' \
+              "# Estado del notificador" \
+              "" \
+              "Rama generada automáticamente por el workflow. No editar a mano." \
+              "- seen.json: ids de ofertas ya vistas." \
+              "- seen.json.tgoffset: último mensaje de Telegram procesado." \
+              "- *.enc: suscriptores y chats, cifrados." \
+              "- last_run: fecha de la última ejecución." \
+              > state-data/README.md
+          fi
+
+          cd state-data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Sin cambios de estado."
+          else
+            git commit -q -m "state: update seen.json [skip ci]"
+            git push origin HEAD:state
+          fi

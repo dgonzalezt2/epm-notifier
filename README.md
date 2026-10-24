@@ -1,6 +1,8 @@
 # Notificador de ofertas EPM → Telegram
 
-Consulta la API REST pública de Oracle HCM que usa la página de empleo de EPM y avisa por Telegram de las ofertas nuevas. Node.js 20+, sin dependencias.
+[![EPM Notifier](https://github.com/dgonzalezt2/epm-notifier/actions/workflows/epm-notifier.yml/badge.svg)](https://github.com/dgonzalezt2/epm-notifier/actions/workflows/epm-notifier.yml)
+
+Consulta la API REST pública de Oracle HCM que usa la página de empleo de EPM y avisa por Telegram de las ofertas nuevas. Node.js 20+, sin dependencias. Se ejecuta con **GitHub Actions** cada 30 minutos, sin servidores ni depender de ningún computador encendido.
 
 ## Pruébalo
 
@@ -18,7 +20,7 @@ Consulta la API REST pública de Oracle HCM que usa la página de empleo de EPM 
 
 > El bot solo guarda el id de tu chat para enviarte los avisos. Puedes cancelarlos cuando quieras desde el mismo menú.
 > ⚠️ Proyecto personal y educativo, **no oficial ni afiliado a EPM** (ver [Aviso legal](#aviso-legal)). Las ofertas se postulan siempre en la página de empleo de EPM.
-> El bot responde mientras la instancia que lo ejecuta esté encendida.
+> ⏱️ El bot no corre de forma permanente: GitHub Actions lo ejecuta cada 30 minutos. Los avisos de ofertas nuevas y las respuestas a los botones pueden tardar hasta ~30 minutos (ver [Cómo funciona](#cómo-funciona)).
 
 ## Aviso legal
 
@@ -97,34 +99,99 @@ Profesional, tecnólogo, técnico, oficial de operación y mantenimiento, electr
 </p>
 
 ## Cómo funciona
-- `GET /hcmRestApi/resources/latest/recruitingCEJobRequisitions` (finder `findReqs`, con paginación) lista las ofertas; `recruitingCEJobRequisitionDetails` da el detalle.
-- Compara con los IDs de `seen.json`. **Primera ejecución**: guarda las existentes sin notificar y envía "Notificador EPM activo".
+
+El bot **no corre de forma permanente**. [GitHub Actions](.github/workflows/epm-notifier.yml) lo ejecuta automáticamente **cada 30 minutos** (cron). En cada ejecución:
+
+1. **Restaura el estado** desde la rama `state`.
+2. **Atiende** los mensajes y botones que llegaron a Telegram desde la ejecución anterior.
+3. **Consulta la API de EPM** (`recruitingCEJobRequisitions`, con paginación) y compara con los ids ya vistos.
+4. **Notifica por Telegram** las ofertas nuevas: a los chats autorizados y a los suscriptores, según el perfil que eligieron. Por cada oferta pide el detalle (`recruitingCEJobRequisitionDetails`) y envía título, ubicación, fecha, resumen, requisitos y enlace.
+5. **Guarda el estado** en la rama `state`, solo si todo terminó bien.
+
+Por eso funciona aunque mi computador esté apagado: Telegram solo entrega mensajes, el código lo ejecuta GitHub.
+
+- **Primera ejecución** (sin `seen.json`): guarda las ofertas existentes **sin notificarlas** y envía "Notificador EPM activo".
 - Todas las ofertas del listado se marcan como vistas, también las que no pasan `KEYWORDS`.
-- El estado se guarda (de forma atómica) después de cada oferta enviada. Si algo falla a mitad, la oferta fallida se reintenta en la siguiente ejecución y las ya enviadas no se repiten.
-- Los errores se imprimen y se mandan a Telegram (sin fallar si Telegram también cae). Reintentos con backoff para red/5xx/429.
+- Si hay un error (HTTP, parseo, Telegram), se imprime y se avisa al administrador por Telegram. Hay reintentos con *backoff* para errores de red, 5xx y 429.
+- **Si el script falla, el job falla de forma visible** (código ≠ 0) y **no se guarda estado**: nunca queda un `seen.json` a medias.
+- `concurrency` impide que corran dos ejecuciones a la vez y `timeout-minutes: 5` corta las que se cuelgan.
 
-## 1. Crear el bot
-1. En Telegram habla con **@BotFather** → `/newbot` → copia el token.
-2. `cp .env.example .env` y pon `TELEGRAM_BOT_TOKEN`.
+### El estado vive en la rama `state`
 
-## 2. Obtener el chat id
-- **Chat personal**: escríbele cualquier mensaje a tu bot y ejecuta `node epm-notifier.mjs --get-chat-id`. Imprime `TELEGRAM_CHAT_ID=...` (nunca el token).
-- **Canal**: añade el bot como administrador, publica algo y ejecuta el mismo comando (el id empieza por `-100`).
+Es una rama huérfana que crea y actualiza el propio workflow (no se edita a mano). No se usa `actions/cache` porque se borra tras 7 días sin uso.
 
-Ponlo en `.env`.
+| Archivo | Contenido | En el repo público |
+|---|---|---|
+| `seen.json` | ids de ofertas ya vistas | en claro |
+| `seen.json.tgoffset` | último mensaje de Telegram procesado | en claro |
+| `seen.json.subs.enc` | suscriptores (chat ids y perfiles) | **cifrado** |
+| `seen.json.chats.enc` | chats autorizados | **cifrado** |
+| `last_run` | fecha de la última ejecución | en claro |
 
-## 3. Ejecutar
+`last_run` se actualiza como máximo una vez al día: así el repositorio mantiene actividad y GitHub no desactiva el schedule por inactividad (60 días).
+
+## Configuración
+
+Necesitas un bot (en Telegram, con **@BotFather** → `/newbot` → copia el token) y tu chat id (escríbele al bot y ejecuta en local `node epm-notifier.mjs --get-chat-id`; solo muestra el id, nunca el token).
+
+En el repositorio: **Settings → Secrets and variables → Actions**.
+
+| Nombre | Tipo | Obligatorio | Para qué sirve |
+|---|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | Secret | Sí | Token del bot |
+| `TELEGRAM_CHAT_ID` | Secret | Sí | Chat del administrador (admite varios ids separados por coma; el primero es el administrador) |
+| `STATE_KEY` | Secret | Sí | Clave para cifrar suscriptores y chats en la rama `state`. Genérala con `openssl rand -base64 32` y guárdala: **si cambia o se pierde, no se pueden descifrar** `subs`/`chats` y las suscripciones se pierden |
+| `KEYWORDS` | Variable | No | Palabras clave separadas por coma; filtra por título/ubicación (sin tildes ni mayúsculas) |
+| `PERFIL` | Variable | No | Perfil(es) para el filtro de los chats autorizados, p. ej. `sistemas` o `sistemas,civil` (ver [Perfiles](#perfiles-filtro-por-carrera)) |
+
+Con la CLI de GitHub (te pide el valor sin mostrarlo):
 ```bash
-node epm-notifier.mjs             # ejecución normal
-node epm-notifier.mjs --dry-run   # imprime en consola, no envía; usa seen.json.dry
+gh secret set TELEGRAM_BOT_TOKEN
+gh secret set TELEGRAM_CHAT_ID
+gh secret set STATE_KEY
+gh variable set KEYWORDS --body "ingeniero,sistemas"   # opcional
 ```
-Configuración (`.env` o variables de entorno): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `KEYWORDS` (opcional, p. ej. `ingeniero,sistemas`; ignora tildes y mayúsculas, filtra por título/ubicación), `STATE_FILE` (por defecto `./seen.json`).
+Los secretos solo se pasan a los pasos que los necesitan (nunca a nivel de job completo) y GitHub los enmascara en los logs; además el script oculta el token y enmascara los chat ids en lo que imprime.
+
+### Lanzarlo a mano y verificar que funciona
+
+1. Ve a **Actions → EPM Notifier → Run workflow** (o `gh workflow run epm-notifier.yml` y `gh run watch`).
+2. En la primera ejecución debe llegarte a Telegram **"✅ Notificador EPM activo"** y en el log verás `Primera ejecución: N ofertas registradas`. Aparece la rama `state` con un commit `state: update seen.json [skip ci]`.
+3. Lánzalo una **segunda vez**: el log dice `Listado: N ofertas, 0 nuevas`, no llega ninguna notificación repetida y, si no hubo cambios, el paso de guardado imprime `Sin cambios de estado`.
+
+Para ver el estado guardado: `git fetch origin state && git show origin/state:seen.json`.
+
+### Correrlo en local (pruebas)
+
+```bash
+cp .env.example .env              # rellena TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID
+node epm-notifier.mjs --dry-run   # imprime en consola, no envía nada; usa seen.json.dry
+node epm-notifier.mjs             # ejecución real
+```
+> ⚠️ Una ejecución real en local usa el **mismo bot**: lee los mensajes pendientes de Telegram y tiene su propio `seen.json`, así que puede duplicar notificaciones o atender comandos antes que el workflow. Para pruebas usa `--dry-run`. Con datos simulados: `EPM_MOCK_DIR=<carpeta>` lee `list-<offset>.json` y `detail-<id>.json` en vez de llamar a la API.
+
+Variables de entorno (`.env` o entorno): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `KEYWORDS` (opcional), `STATE_FILE` (por defecto `./seen.json`), `PERFIL` (opcional) y `MAX_SUBS` (opcional).
+
+### Limitaciones
+
+- **Los schedules de GitHub no son exactos:** pueden retrasarse minutos, y más en horas pico. El mínimo permitido es 5 minutos; para ofertas laborales 30 minutos es suficiente.
+- **Respuesta a comandos y botones con retraso:** el bot solo "escucha" cuando corre el workflow, así que `/ofertas`, `/perfiles` o *Suscribirme* pueden tardar hasta ~30 minutos en responder (Telegram conserva los mensajes pendientes 24 horas). Para respuesta inmediata necesitas un proceso siempre activo (ver [alternativas](#alternativas-de-despliegue)).
+- **Minutos de Actions:** en repos **públicos** son ilimitados. En repos **privados** hay 2.000 min gratis al mes y cada ejecución cuenta al menos 1 minuto; por eso son 30 minutos y no 15 o 20 (48 ejecuciones al día ≈ 1.440 min al mes).
+- Si la API de EPM rechazara las IPs de GitHub, el job fallaría de forma visible y se avisaría por Telegram.
+
+### Repositorio público: qué implica
+
+- El código y la rama `state` son visibles para todos. La rama contiene solo ids de ofertas, un contador de Telegram y una fecha; los **suscriptores y chats van cifrados** (AES-256-CBC con PBKDF2) con `STATE_KEY`.
+- Los **Secrets no son visibles** y no se pasan a *forks* ni a *pull requests* de terceros.
+- Los **logs de Actions también son públicos**: por eso el script no imprime tokens ni chat ids completos (solo `***` y los 3 últimos dígitos).
+
+## Uso del bot: perfiles, suscripciones y comandos
 
 ### Perfiles (filtro por carrera)
 ```bash
 node epm-notifier.mjs --perfil sistemas   # o PERFIL=sistemas en .env / variable de entorno
 ```
-Perfiles disponibles: `sistemas`, `administracion`, `civil`, `electrica`, `mecanica`, `industrial`, `ambiental`, `financiera`, `juridica`, `talento`, `sst`, `comunicaciones`, `comercial` y `tecnico` (técnicos/tecnólogos/operarios). Se pueden combinar: `--perfil sistemas,civil`. Cada uno incluye términos afines (p. ej. `sistemas`: ingeniería de sistemas/informática/software, TI, desarrollador, datos, ciberseguridad, nube, telemática…) y los busca como palabra completa en título y descripción. Se combina con `KEYWORDS` (basta que cumpla una). Las ofertas que no pasan el filtro se marcan igualmente como vistas. Para añadir perfiles o términos, edita `PROFILES` en `epm-notifier.mjs`. En cron añade `--perfil sistemas` al comando; en K3s usa `PERFIL: sistemas` en el Secret.
+Perfiles disponibles: `sistemas`, `administracion`, `civil`, `electrica`, `mecanica`, `industrial`, `ambiental`, `financiera`, `juridica`, `talento`, `sst`, `comunicaciones`, `comercial` y `tecnico` (técnicos/tecnólogos/operarios). Se pueden combinar: `--perfil sistemas,civil`. Cada uno incluye términos afines (p. ej. `sistemas`: ingeniería de sistemas/informática/software, TI, desarrollador, datos, ciberseguridad, nube, telemática…) y los busca como palabra completa en título y descripción. Se combina con `KEYWORDS` (basta que cumpla una). Las ofertas que no pasan el filtro se marcan igualmente como vistas. Para añadir perfiles o términos, edita `PROFILES` en `epm-notifier.mjs`. En GitHub Actions crea la variable `PERFIL` (p. ej. `sistemas`); en cron añade `--perfil sistemas` al comando; en K3s usa `PERFIL: sistemas` en el Secret.
 
 ### Usuarios, suscripciones y grupos
 Hay dos tipos de chats:
@@ -134,21 +201,22 @@ Hay dos tipos de chats:
 
 **Grupo:** añade el bot al grupo. Cualquier miembro puede consultar y suscribir *el grupo* con los botones. Si como administrador escribes `/activar` en el grupo, queda autorizado (recibe todo); `/desactivar` lo quita.
 
-**Administración** (solo tú, en privado con el bot): `/agregar <id>`, `/quitar <id>` y `/chats` (lista los autorizados y cuenta los suscriptores). Los autorizados añadidos así se guardan en `seen.json.chats`. En K3s estos archivos van en el PVC.
+**Administración** (solo tú, en privado con el bot): `/agregar <id>`, `/quitar <id>` y `/chats` (lista los autorizados y cuenta los suscriptores). Los autorizados añadidos así se guardan en `seen.json.chats`. Con GitHub Actions, `seen.json.subs` y `seen.json.chats` se guardan **cifrados** en la rama `state`; en K3s van en el PVC.
 
 ### Comandos de Telegram
 Escríbele al bot: `/comandos` (menú), `/ofertas` (todas), `/perfiles`, `/suscribir`, `/sistemas` (ofertas abiertas de un perfil), `/ayuda`.
-- **Con cron/CronJob** los comandos se atienden en cada ejecución (hasta 20 min de retraso).
-- **Respuesta inmediata**: `node epm-notifier.mjs --listen` queda activo, responde al instante y revisa ofertas nuevas cada 20 min (no uses cron a la vez). En K3s aplica `k8s/deployment.yaml` en lugar del CronJob.
+Con GitHub Actions los comandos y botones se atienden en cada ejecución (cada ~30 min). Si necesitas respuesta inmediata, usa `node epm-notifier.mjs --listen` (proceso siempre activo, ver abajo).
 
-Para probar con datos simulados: `EPM_MOCK_DIR=<carpeta>` lee `list-<offset>.json` y `detail-<id>.json` en vez de llamar a la API.
+## Alternativas de despliegue
 
-## 4a. Programar con cron (cada 20 min)
+GitHub Actions es la forma recomendada. Estas alternativas guardan su propio estado local (no lo comparten con la rama `state`): **no las uses a la vez que el workflow con el mismo bot**, porque se pelean por los mensajes de Telegram y duplican avisos. Si pruebas una, desactiva antes el workflow (Actions → EPM Notifier → *Disable workflow*).
+
+### Cron local (cada 20 min)
 ```cron
 */20 * * * * cd /ruta/a/EPM && /usr/bin/node epm-notifier.mjs >> notifier.log 2>&1
 ```
 
-## 4b. K3s
+### K3s (y respuesta inmediata con `--listen`)
 ```bash
 docker build -t epm-notifier:latest .
 # K3s usa containerd: importa la imagen (o súbela a tu registro y ajusta k8s/cronjob.yaml)
@@ -162,7 +230,7 @@ kubectl apply -f k8s/pvc.yaml -f k8s/cronjob.yaml
 kubectl create job --from=cronjob/epm-notifier epm-test   # ejecución manual
 kubectl logs job/epm-notifier-test
 ```
-El PVC (`/data/seen.json`) evita que lleguen ofertas repetidas tras cada ejecución. Con `local-path` (RWO) el job debe correr en el mismo nodo; `concurrencyPolicy: Forbid` evita solapes.
+El PVC (`/data/seen.json`) evita que lleguen ofertas repetidas tras cada ejecución. Con `local-path` (RWO) el job debe correr en el mismo nodo; `concurrencyPolicy: Forbid` evita solapes. Para responder a comandos y botones al instante, aplica `k8s/deployment.yaml` (ejecuta `--listen`: responde al momento y revisa ofertas cada 20 min) en lugar del CronJob.
 
 ## Seguridad
-El token solo vive en `.env` / Secret. `.env` y `seen.json` están en `.gitignore` y los logs enmascaran el token.
+El token solo vive en GitHub Secrets (o en `.env` para pruebas locales). `.env` y `seen.json*` están en `.gitignore`: el estado nunca va a la rama `main`, solo a `state`. Los logs enmascaran el token y los chat ids. Si sospechas que el token se filtró, revócalo con @BotFather (`/revoke`) y actualiza el Secret.

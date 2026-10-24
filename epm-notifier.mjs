@@ -151,6 +151,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const redact = (s) => (cfg.token ? String(s).split(cfg.token).join('***') : String(s));
 const log = (...a) => console.log(...a.map(redact));
 const logErr = (...a) => console.error(...a.map(redact));
+// Los logs de GitHub Actions son públicos en repos públicos: nunca se imprimen chat ids completos.
+const maskId = (id) => `***${String(id).slice(-3)}`;
 
 const ENTITIES = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 function htmlToText(html) {
@@ -475,7 +477,7 @@ function dropSub(id) {
   if (subs[String(id)]) {
     delete subs[String(id)];
     saveSubs(subs);
-    log(`Suscripción eliminada (chat inaccesible): ${id}`);
+    log(`Suscripción eliminada (chat inaccesible): ${maskId(id)}`);
   }
 }
 
@@ -544,7 +546,7 @@ async function deliver(html, recipients) {
       ok++;
     } catch (e) {
       lastErr = e;
-      logErr(`No se pudo enviar a ${c}:`, e.message);
+      logErr(`No se pudo enviar a ${maskId(c)}:`, e.message);
       if (/blocked|chat not found|deactivated|kicked|not a member/i.test(e.message)) dropSub(c);
     }
     await sleep(60); // límite de Telegram: ~30 mensajes/s
@@ -681,11 +683,11 @@ async function handleAdminCommand(cmd, rest, chat, isAdmin) {
     if (chat.type === 'private') return deny('Usa este comando dentro de un grupo donde esté el bot.');
     if (cmd === 'activar') {
       saveExtraChats([...extraChats(), id]);
-      log(`Chat activado: ${id}`);
+      log(`Chat activado: ${maskId(id)}`);
       await reply('✅ Grupo activado. Recibirá las ofertas nuevas y cualquiera aquí puede usar /comandos.', mainMenu());
     } else {
       saveExtraChats(extraChats().filter((c) => c !== id));
-      log(`Chat desactivado: ${id}`);
+      log(`Chat desactivado: ${maskId(id)}`);
       await reply('🔕 Grupo desactivado.');
     }
     return true;
@@ -731,11 +733,11 @@ async function pollCommands(timeout = 0) {
         const [name, target] = rawCmd.split('@');
         if (target && botName && target.toLowerCase() !== botName) continue; // comando dirigido a otro bot
         const cmd = name.toLowerCase();
-        log(`Comando recibido: /${cmd} (chat ${chat.id})`);
+        log(`Comando recibido: /${cmd} (chat ${maskId(chat.id)})`);
         if (await handleAdminCommand(cmd, rest, chat, isAdmin)) continue;
         await handleCommand(cmd, chat.id);
       } else if (cq) {
-        log(`Botón pulsado: ${cq.data} (chat ${chat.id})`);
+        log(`Botón pulsado: ${cq.data} (chat ${maskId(chat.id)})`);
         await tgCall('answerCallbackQuery', { callback_query_id: cq.id }).catch(() => {});
         await handleCommand(String(cq.data || ''), chat.id, { messageId: cq.message.message_id });
       }

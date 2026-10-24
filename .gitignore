@@ -2,3 +2,5 @@
 seen.json*
 k8s/secret.yaml
 node_modules/
+run/
+state-data/
