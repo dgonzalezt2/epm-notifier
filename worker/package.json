@@ -1,0 +1,14 @@
+{
+  "name": "epm-notifier-webhook",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Cloudflare Worker: webhook de Telegram -> repository_dispatch de GitHub",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

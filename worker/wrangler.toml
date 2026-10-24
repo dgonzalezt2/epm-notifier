@@ -1,0 +1,13 @@
+name = "epm-notifier-webhook"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+# Valores NO secretos. Los secrets (WEBHOOK_SECRET, GH_DISPATCH_TOKEN) se cargan con `wrangler secret put`.
+[vars]
+GITHUB_REPO = "dgonzalezt2/epm-notifier"
+GITHUB_API = "https://api.github.com"
+
+# Sin logs de peticiones: el Worker no registra tokens ni contenido de mensajes.
+[observability]
+enabled = false

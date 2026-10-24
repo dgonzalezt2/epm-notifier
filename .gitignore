@@ -4,3 +4,6 @@ k8s/secret.yaml
 node_modules/
 run/
 state-data/
+worker/node_modules/
+worker/.wrangler/
+worker/.dev.vars

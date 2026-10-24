@@ -30,6 +30,17 @@ const args = new Set(process.argv.slice(2));
 const DRY = args.has('--dry-run');
 const GET_CHAT = args.has('--get-chat-id');
 const LISTEN = args.has('--listen');
+const flagVal = (name) => {
+  const a = process.argv.slice(2);
+  const i = a.findIndex((x) => x === name || x.startsWith(`${name}=`));
+  if (i < 0) return '';
+  return a[i].includes('=') ? a[i].split('=').slice(1).join('=') : a[i + 1] || '';
+};
+const WEBHOOK_RUN = args.has('--webhook'); // procesa la update de TG_UPDATE (repository_dispatch)
+const FLUSH_FILE = flagVal('--flush-outbox'); // envía las respuestas acumuladas
+const WEBHOOK_CLI = ['--set-webhook', '--delete-webhook', '--webhook-info'].some((f) =>
+  process.argv.slice(2).some((a) => a === f || a.startsWith(`${f}=`)),
+);
 const MOCK = process.env.EPM_MOCK_DIR || null; // solo para pruebas
 
 const cfg = {
@@ -289,7 +300,12 @@ function buildMessage(job, d) {
 }
 
 // ---------- Telegram ----------
-async function tgCall(method, payload) {
+// Modo webhook: los mensajes y ediciones se acumulan en OUTBOX y solo se envían cuando el estado ya se guardó
+// con éxito (--flush-outbox). Así, si hay que reintentar por un conflicto al guardar, no se duplica ninguna respuesta.
+let OUTBOX = null;
+const DEFERRED = new Set(['sendMessage', 'editMessageText']);
+
+async function tgSend(method, payload) {
   return withRetry('Telegram', async () => {
     const r = await httpJson(`https://api.telegram.org/bot${cfg.token}/${method}`, {
       method: 'POST',
@@ -299,6 +315,42 @@ async function tgCall(method, payload) {
     if (!r.ok) throw Object.assign(new Error(`Telegram: ${r.description}`), { retryable: false });
     return r;
   });
+}
+
+async function tgCall(method, payload) {
+  if (OUTBOX && DEFERRED.has(method)) {
+    OUTBOX.push({ method, payload });
+    return { ok: true, result: {} };
+  }
+  return tgSend(method, payload);
+}
+
+async function flushOutbox(file) {
+  const items = JSON.parse(readFileSync(file, 'utf8'));
+  let sent = 0;
+  for (const it of items) {
+    try {
+      await tgSend(it.method, it.payload);
+      sent++;
+    } catch (e) {
+      let err = e;
+      if (/message is not modified/i.test(e.message)) continue;
+      if (it.method === 'editMessageText') {
+        try {
+          // el mensaje del menú ya no se puede editar: se envía uno nuevo
+          const { message_id, ...rest } = it.payload;
+          await tgSend('sendMessage', rest);
+          sent++;
+          continue;
+        } catch (e2) {
+          err = e2;
+        }
+      }
+      logErr(`No se pudo enviar ${it.method}:`, err.message);
+    }
+    await sleep(40);
+  }
+  log(`Respuestas enviadas: ${sent}/${items.length}`);
 }
 
 async function sendTelegram(html, chatId = cfg.chatId, keyboard = null) {
@@ -316,6 +368,7 @@ async function sendTelegram(html, chatId = cfg.chatId, keyboard = null) {
 }
 
 async function notifyError(err) {
+  OUTBOX = null; // el aviso de error no debe quedar en cola
   logErr('ERROR:', err?.stack || err);
   if (DRY || !cfg.token || !cfg.chatId) return;
   try {
@@ -374,6 +427,18 @@ const loadOffset = () => {
   }
 };
 const saveOffset = (n) => writeFileSync(offsetFile, String(n));
+
+// Últimos update_id de comandos que cambian estado: evita aplicar dos veces una update reentregada.
+const appliedFile = `${cfg.stateFile}.applied`;
+const loadApplied = () => {
+  try {
+    const a = JSON.parse(readFileSync(appliedFile, 'utf8'));
+    return Array.isArray(a) ? a : [];
+  } catch {
+    return [];
+  }
+};
+const markApplied = (id) => writeFileSync(appliedFile, JSON.stringify([...loadApplied().filter((x) => x !== id), id].slice(-200)));
 
 const PROFILE_LABELS = {
   sistemas: '💻 Sistemas',
@@ -712,7 +777,85 @@ async function handleAdminCommand(cmd, rest, chat, isAdmin) {
   return false;
 }
 
-// Procesa mensajes y botones pendientes (las consultas están abiertas a cualquier chat).
+// Comandos que cambian estado (suscripciones y administración): se deduplican por update_id.
+const isMutating = (c) => c === 'unsub' || c.startsWith('sub:') || ['activar', 'desactivar', 'agregar', 'quitar'].includes(c);
+
+// Valida y reduce una update de Telegram a lo que usa el bot. También se aplica a lo que llega por webhook
+// (el Worker ya la reduce, pero aquí se trata como no confiable).
+function sanitizeUpdate(u) {
+  const int = (x) => Number.isSafeInteger(x);
+  const chatOf = (c) => (c && int(c.id) && ['private', 'group', 'supergroup'].includes(c.type) ? { id: c.id, type: c.type } : null);
+  if (!u || !int(u.update_id)) return null;
+  if (u.message) {
+    const m = u.message;
+    const chat = chatOf(m.chat);
+    if (!chat || typeof m.text !== 'string' || !m.text.startsWith('/')) return null;
+    return {
+      update_id: u.update_id,
+      message: { chat, from: int(m.from?.id) ? { id: m.from.id } : undefined, text: m.text.slice(0, 256) },
+    };
+  }
+  if (u.callback_query) {
+    const q = u.callback_query;
+    const chat = chatOf(q.message?.chat);
+    if (!chat || typeof q.id !== 'string' || typeof q.data !== 'string' || !int(q.message?.message_id)) return null;
+    return {
+      update_id: u.update_id,
+      callback_query: {
+        id: q.id.slice(0, 64),
+        data: q.data.slice(0, 64),
+        from: int(q.from?.id) ? { id: q.from.id } : undefined,
+        message: { message_id: q.message.message_id, chat },
+      },
+    };
+  }
+  return null;
+}
+
+// Atiende UNA update (mensaje con comando o botón). Las consultas están abiertas a cualquier chat.
+async function processUpdate(u) {
+  try {
+    const m = u.message;
+    const cq = u.callback_query;
+    const chat = m?.chat || cq?.message?.chat;
+    if (!chat) return;
+    const isAdmin = String((m?.from || cq?.from)?.id) === cfg.chatId;
+    let cmd;
+    let rest = [];
+    if (m?.text?.startsWith('/')) {
+      const [rawCmd, ...args2] = m.text.slice(1).split(/\s+/);
+      const [name, target] = rawCmd.split('@');
+      if (target) {
+        if (!botName) botName = ((await tgCall('getMe', {})).result?.username || '').toLowerCase();
+        if (botName && target.toLowerCase() !== botName) return; // comando dirigido a otro bot
+      }
+      cmd = name.toLowerCase();
+      rest = args2;
+    } else if (cq) {
+      cmd = String(cq.data || '').toLowerCase();
+    } else return;
+
+    const mutating = isMutating(cmd);
+    if (mutating && loadApplied().includes(u.update_id)) {
+      log(`Update ${u.update_id} ya aplicada: se omite (chat ${maskId(chat.id)})`);
+      return;
+    }
+
+    if (m) {
+      log(`Comando recibido: /${cmd} (chat ${maskId(chat.id)})`);
+      if (!(await handleAdminCommand(cmd, rest, chat, isAdmin))) await handleCommand(cmd, chat.id);
+    } else {
+      log(`Botón pulsado: ${cmd} (chat ${maskId(chat.id)})`);
+      await tgCall('answerCallbackQuery', { callback_query_id: cq.id }).catch(() => {}); // siempre inmediato
+      await handleCommand(cmd, chat.id, { messageId: cq.message.message_id });
+    }
+    if (mutating) markApplied(u.update_id);
+  } catch (e) {
+    logErr('Error atendiendo actualización:', e.message);
+  }
+}
+
+// Modo sin webhook (cron local, K3s, --listen): lee los mensajes pendientes con getUpdates.
 async function pollCommands(timeout = 0) {
   await registerCommands();
   let offset = loadOffset();
@@ -722,31 +865,125 @@ async function pollCommands(timeout = 0) {
   );
   for (const u of r.result || []) {
     offset = u.update_id + 1;
-    try {
-      const m = u.message;
-      const cq = u.callback_query;
-      const chat = m?.chat || cq?.message?.chat;
-      if (!chat) continue;
-      const isAdmin = String((m?.from || cq?.from)?.id) === cfg.chatId;
-      if (m?.text?.startsWith('/')) {
-        const [rawCmd, ...rest] = m.text.slice(1).split(/\s+/);
-        const [name, target] = rawCmd.split('@');
-        if (target && botName && target.toLowerCase() !== botName) continue; // comando dirigido a otro bot
-        const cmd = name.toLowerCase();
-        log(`Comando recibido: /${cmd} (chat ${maskId(chat.id)})`);
-        if (await handleAdminCommand(cmd, rest, chat, isAdmin)) continue;
-        await handleCommand(cmd, chat.id);
-      } else if (cq) {
-        log(`Botón pulsado: ${cq.data} (chat ${maskId(chat.id)})`);
-        await tgCall('answerCallbackQuery', { callback_query_id: cq.id }).catch(() => {});
-        await handleCommand(String(cq.data || ''), chat.id, { messageId: cq.message.message_id });
+    const clean = sanitizeUpdate(u);
+    if (clean) await processUpdate(clean);
+    saveOffset(offset);
+  }
+}
+
+// ---------- webhook (Cloudflare Worker -> repository_dispatch) ----------
+// Una ejecución por update: procesa la que llega en TG_UPDATE y deja las respuestas en OUTBOX_FILE.
+// scripts/epm-run.sh guarda el estado y, solo si el push funcionó, ejecuta --flush-outbox.
+async function runWebhook() {
+  let raw;
+  try {
+    raw = JSON.parse(process.env.TG_UPDATE || '');
+  } catch {
+    throw new Error('TG_UPDATE ausente o no es JSON válido');
+  }
+  const clean = sanitizeUpdate(raw);
+  const outFile = process.env.OUTBOX_FILE || resolve(dirname(cfg.stateFile), 'outbox.json');
+  if (!clean) {
+    log('Update ignorada: tipo o formato no usado por el bot.');
+    writeFileSync(outFile, '[]');
+    return;
+  }
+  OUTBOX = [];
+  await processUpdate(clean);
+  writeFileSync(outFile, JSON.stringify(OUTBOX));
+  log(`Update ${clean.update_id} procesada: ${OUTBOX.length} respuesta(s) en cola.`);
+}
+
+// Reenvía un update al propio workflow con el GITHUB_TOKEN del job (repository_dispatch sí dispara workflows).
+async function ghDispatch(update) {
+  const repo = process.env.GITHUB_REPOSITORY;
+  const ghToken = process.env.GITHUB_TOKEN;
+  if (!repo || !ghToken) throw new Error('Falta GITHUB_REPOSITORY/GITHUB_TOKEN para reenviar comandos pendientes');
+  const base = process.env.GITHUB_API_URL || 'https://api.github.com';
+  const res = await fetch(`${base}/repos/${repo}/dispatches`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${ghToken}`,
+      accept: 'application/vnd.github+json',
+      'x-github-api-version': '2022-11-28',
+      'user-agent': 'epm-notifier',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ event_type: 'telegram_update', client_payload: { update } }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (res.status !== 204) throw new Error(`repository_dispatch HTTP ${res.status}`);
+}
+
+// Respaldo: lee los pendientes con getUpdates y los reenvía como repository_dispatch (máx. 50 por corrida).
+async function drainViaDispatch() {
+  let offset = loadOffset();
+  let n = 0;
+  for (;;) {
+    const r = await tgCall('getUpdates', { offset, timeout: 0, limit: 50, allowed_updates: ['message', 'callback_query'] });
+    const batch = r.result || [];
+    if (!batch.length) return { done: true, n };
+    for (const u of batch) {
+      const clean = sanitizeUpdate(u);
+      if (clean) {
+        if (n >= 50) return { done: false, n };
+        await ghDispatch(clean);
+        n++;
       }
-    } catch (e) {
-      logErr('Error atendiendo actualización:', e.message);
-    } finally {
+      offset = u.update_id + 1;
       saveOffset(offset);
     }
   }
+}
+
+const WEBHOOK_UPDATES = ['message', 'callback_query'];
+async function registerWebhook(url, secret) {
+  await tgCall('setWebhook', { url, secret_token: secret, allowed_updates: WEBHOOK_UPDATES, drop_pending_updates: false });
+}
+
+// Cron: con webhook sano no se leen mensajes (llegan por repository_dispatch). Si Telegram no consigue entregar,
+// se desactiva el webhook, se reenvían los pendientes y (si hay WEBHOOK_URL y TELEGRAM_WEBHOOK_SECRET) se vuelve a registrar.
+async function pollOrDelegate() {
+  const info = (await tgCall('getWebhookInfo', {})).result || {};
+  if (!info.url) return pollCommands(0); // sin webhook: modo anterior
+  const recentError = info.last_error_date && Date.now() / 1000 - info.last_error_date < 35 * 60;
+  if (!(info.pending_update_count > 0 && recentError)) return; // webhook sano
+
+  log(`Webhook sin entregar (${info.pending_update_count} pendientes): respaldo desde el cron.`);
+  const reason = clip(String(info.last_error_message || 'sin detalle'), 120);
+  await tgCall('deleteWebhook', { drop_pending_updates: false });
+  const { done, n } = await drainViaDispatch();
+  const url = process.env.WEBHOOK_URL;
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  let rehook = 'No se volvió a registrar (faltan WEBHOOK_URL / TELEGRAM_WEBHOOK_SECRET): el bot está en modo cron.';
+  if (done && url && secret) {
+    await registerWebhook(url, secret);
+    rehook = 'Webhook registrado de nuevo.';
+  } else if (!done) rehook = 'Quedan pendientes: se atenderán en la siguiente ejecución (webhook sigue desactivado).';
+  await sendTelegram(`⚠️ <b>Webhook sin entregar</b>\n${esc(reason)}\nReenvié ${n} comando(s) pendiente(s). ${esc(rehook)}`);
+}
+
+// Herramientas locales: --set-webhook=<url> | --delete-webhook | --webhook-info (nunca imprimen token ni secret).
+async function webhookCli() {
+  if (args.has('--webhook-info')) {
+    const i = (await tgCall('getWebhookInfo', {})).result || {};
+    log(`webhook activo: ${i.url ? 'sí' : 'no'} | pendientes: ${i.pending_update_count ?? 0}`);
+    if (i.last_error_date) {
+      log(`último error: ${new Date(i.last_error_date * 1000).toISOString()} — ${clip(String(i.last_error_message || ''), 160)}`);
+    }
+    return;
+  }
+  if (args.has('--delete-webhook')) {
+    await tgCall('deleteWebhook', { drop_pending_updates: false });
+    log('Webhook desactivado. Los mensajes pendientes se conservan; el bot vuelve al modo cron.');
+    return;
+  }
+  const url = flagVal('--set-webhook') || process.env.WEBHOOK_URL || '';
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET || '';
+  if (!/^https:\/\/[^\s]+$/.test(url)) throw new Error('Uso: --set-webhook=https://<tu-worker>.workers.dev');
+  if (!/^[A-Za-z0-9_-]{32,256}$/.test(secret)) throw new Error('TELEGRAM_WEBHOOK_SECRET debe tener 32-256 caracteres [A-Za-z0-9_-]');
+  await registerWebhook(url, secret);
+  log('Webhook registrado en Telegram (allowed_updates: message, callback_query; pendientes conservados).');
 }
 
 async function listen() {
@@ -782,10 +1019,14 @@ async function main() {
         : 'Falta TELEGRAM_CHAT_ID. Escríbele al bot y ejecuta: node epm-notifier.mjs --get-chat-id',
     );
   }
+  if (WEBHOOK_CLI) return webhookCli();
+  if (FLUSH_FILE) return flushOutbox(FLUSH_FILE);
+  if (WEBHOOK_RUN) return runWebhook();
   if (LISTEN) return listen();
   if (!DRY) {
     try {
-      await pollCommands(0);
+      await registerCommands();
+      await pollOrDelegate();
     } catch (e) {
       logErr('Comandos no procesados:', e.message);
     }
