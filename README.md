@@ -4,9 +4,13 @@ Consulta la API REST pública de Oracle HCM que usa la página de empleo de EPM 
 
 ## Pruébalo
 
-👉 **[Abrir el bot en Telegram: @epmofertasbot](https://t.me/epmofertasbot)** (o escanea el QR con la cámara de tu celular).
-
-<img src="docs/qr-bot.png" alt="QR de @epmofertasbot" width="220">
+<p align="center">
+  <a href="https://t.me/epmofertasbot"><img src="docs/qr-bot.png" alt="QR de @epmofertasbot" width="240"></a>
+  <br>
+  <b><a href="https://t.me/epmofertasbot">Abrir @epmofertasbot en Telegram</a></b>
+  <br>
+  <sub>Escanea el QR con la cámara de tu celular o toca el enlace</sub>
+</p>
 
 1. Pulsa **Iniciar / Start**.
 2. Toca **🎯 Perfiles** para ver si hay ofertas de tu carrera o cargo.
