@@ -34,11 +34,11 @@ Al abrir el bot por primera vez, Telegram muestra qué hace y el botón **Inicia
 
 | 1. Primer ingreso | 2. Menú de inicio | 3. Todas las ofertas | 4. Cómo filtrar |
 |:---:|:---:|:---:|:---:|
-| <img src="docs/screenshots/bienvenida.png" alt="Primer ingreso: descripción del bot y botón Iniciar" width="200"> | <img src="docs/screenshots/start.png" alt="Menú de inicio" width="200"> | <img src="docs/screenshots/ofertas.png" alt="Lista de ofertas abiertas" width="200"> | <img src="docs/screenshots/perfiles.png" alt="Perfiles: por carrera o por cargo" width="200"> |
+| <img src="docs/screenshots/bienvenida.png" alt="Primer ingreso: descripción del bot y botón Iniciar" width="200"> | <img src="docs/screenshots/start1.png" alt="Menú de inicio tras /start" width="200"> | <img src="docs/screenshots/ofertas.png" alt="Lista de ofertas abiertas" width="200"> | <img src="docs/screenshots/perfiles.png" alt="Perfiles: por carrera o por cargo" width="200"> |
 
-| 5. Por carrera / área | 6. Por cargo / nivel | 7. Ayuda |
-|:---:|:---:|:---:|
-| <img src="docs/screenshots/perfilesCarrera.png" alt="Perfiles por carrera" width="200"> | <img src="docs/screenshots/perfilesCargo.png" alt="Perfiles por cargo y resultado" width="200"> | <img src="docs/screenshots/ayuda.png" alt="Ayuda y comandos" width="200"> |
+| 5. Por carrera / área | 6. Por cargo / nivel | 7. Suscribirse a avisos | 8. Ayuda |
+|:---:|:---:|:---:|:---:|
+| <img src="docs/screenshots/perfilesCarrera.png" alt="Perfiles por carrera" width="200"> | <img src="docs/screenshots/perfilesCargo.png" alt="Perfiles por cargo y resultado" width="200"> | <img src="docs/screenshots/suscribirse.png" alt="Suscripción a avisos por perfil" width="200"> | <img src="docs/screenshots/ayuda.png" alt="Ayuda y comandos" width="200"> |
 
 ## Cómo funciona
 - `GET /hcmRestApi/resources/latest/recruitingCEJobRequisitions` (finder `findReqs`, con paginación) lista las ofertas; `recruitingCEJobRequisitionDetails` da el detalle.
