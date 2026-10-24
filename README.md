@@ -30,15 +30,71 @@ Consulta la API REST pública de Oracle HCM que usa la página de empleo de EPM 
 
 ## Cómo se ve
 
-Al abrir el bot por primera vez, Telegram muestra qué hace y el botón **Iniciar**. Después, `/start` o `/comandos` abre un menú con botones.
+> 🔍 Toca o haz clic en cualquier imagen para verla en tamaño completo.
 
-| 1. Primer ingreso | 2. Menú de inicio | 3. Todas las ofertas | 4. Cómo filtrar |
-|:---:|:---:|:---:|:---:|
-| <img src="docs/screenshots/bienvenida.png" alt="Primer ingreso: descripción del bot y botón Iniciar" width="200"> | <img src="docs/screenshots/start1.png" alt="Menú de inicio tras /start" width="200"> | <img src="docs/screenshots/ofertas.png" alt="Lista de ofertas abiertas" width="200"> | <img src="docs/screenshots/perfiles.png" alt="Perfiles: por carrera o por cargo" width="200"> |
+### 1. Primer ingreso
 
-| 5. Por carrera / área | 6. Por cargo / nivel | 7. Suscribirse a avisos | 8. Ayuda |
-|:---:|:---:|:---:|:---:|
-| <img src="docs/screenshots/perfilesCarrera.png" alt="Perfiles por carrera" width="200"> | <img src="docs/screenshots/perfilesCargo.png" alt="Perfiles por cargo y resultado" width="200"> | <img src="docs/screenshots/suscribirse.png" alt="Suscripción a avisos por perfil" width="200"> | <img src="docs/screenshots/ayuda.png" alt="Ayuda y comandos" width="200"> |
+Al abrir el bot por primera vez, Telegram muestra qué hace y el botón **Iniciar**.
+
+<p align="center">
+  <a href="docs/screenshots/bienvenida.png"><img src="docs/screenshots/bienvenida.png" alt="Primer ingreso: descripción del bot y botón Iniciar" width="380"></a>
+</p>
+
+### 2. Menú de inicio
+
+Con `/start` (o `/comandos`) el bot se presenta y ofrece un menú con botones: **Ofertas**, **Perfiles**, **Suscribirme** y **Ayuda**.
+
+<p align="center">
+  <a href="docs/screenshots/start1.png"><img src="docs/screenshots/start1.png" alt="Menú de inicio tras /start" width="700"></a>
+</p>
+
+### 3. Todas las ofertas
+
+**📋 Ofertas** (o `/ofertas`) lista las ofertas abiertas con cargo, ubicación, fecha y enlace a la página oficial de EPM.
+
+<p align="center">
+  <a href="docs/screenshots/ofertas.png"><img src="docs/screenshots/ofertas.png" alt="Lista de ofertas abiertas" width="700"></a>
+</p>
+
+### 4. Cómo filtrar
+
+**🎯 Perfiles** (o `/perfiles`) permite filtrar por carrera o por cargo y responde si hay ofertas para ti.
+
+<p align="center">
+  <a href="docs/screenshots/perfiles.png"><img src="docs/screenshots/perfiles.png" alt="Perfiles: por carrera o por cargo" width="700"></a>
+</p>
+
+### 5. Por carrera / área
+
+Sistemas, civil, eléctrica, financiera, jurídica, talento humano y más.
+
+<p align="center">
+  <a href="docs/screenshots/perfilesCarrera.png"><img src="docs/screenshots/perfilesCarrera.png" alt="Perfiles por carrera" width="700"></a>
+</p>
+
+### 6. Por cargo / nivel
+
+Profesional, tecnólogo, técnico, oficial de operación y mantenimiento, electricista… Si hay coincidencias, las lista; si no, te lo dice.
+
+<p align="center">
+  <a href="docs/screenshots/perfilesCargo.png"><img src="docs/screenshots/perfilesCargo.png" alt="Perfiles por cargo y resultado" width="700"></a>
+</p>
+
+### 7. Suscribirse a avisos
+
+**🔔 Suscribirme** (o `/suscribir`): elige *todas las ofertas* o uno o varios perfiles (✅ = activo) y recibe un aviso automático cuando EPM publique algo nuevo. Se cancela con **🔕 Cancelar avisos**.
+
+<p align="center">
+  <a href="docs/screenshots/suscribirse.png"><img src="docs/screenshots/suscribirse.png" alt="Suscripción a avisos por perfil" width="700"></a>
+</p>
+
+### 8. Ayuda
+
+`/ayuda` lista los comandos disponibles.
+
+<p align="center">
+  <a href="docs/screenshots/ayuda.png"><img src="docs/screenshots/ayuda.png" alt="Ayuda y comandos" width="700"></a>
+</p>
 
 ## Cómo funciona
 - `GET /hcmRestApi/resources/latest/recruitingCEJobRequisitions` (finder `findReqs`, con paginación) lista las ofertas; `recruitingCEJobRequisitionDetails` da el detalle.
