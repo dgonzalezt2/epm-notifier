@@ -2,7 +2,7 @@
 
 [![EPM Notifier](https://github.com/dgonzalezt2/epm-notifier/actions/workflows/epm-notifier.yml/badge.svg)](https://github.com/dgonzalezt2/epm-notifier/actions/workflows/epm-notifier.yml)
 
-Consulta la API REST pública de Oracle HCM que usa la página de empleo de EPM y avisa por Telegram de las ofertas nuevas. Node.js 20+, sin dependencias. Corre en **GitHub Actions** (cron cada 30 minutos para las ofertas nuevas) y los comandos y botones responden en **~15–30 segundos** gracias a un **Cloudflare Worker**. 100 % gratis, sin servidores y sin depender de ningún computador encendido.
+Consulta la API REST pública de Oracle HCM que usa la página de empleo de EPM y avisa por Telegram de las ofertas nuevas. Node.js 20+, sin dependencias. Corre en **GitHub Actions** (revisión de ofertas nuevas cada ~30 minutos, con dos disparadores) y los comandos y botones responden en **~15–30 segundos** gracias a un **Cloudflare Worker**. 100 % gratis, sin servidores y sin depender de ningún computador encendido.
 
 ## Pruébalo
 
@@ -145,10 +145,11 @@ El bot **no corre de forma permanente**: lo ejecuta [GitHub Actions](.github/wor
                         reduce la update                          comando o botón         guarda el estado
 
  Ofertas nuevas (y respaldo de comandos)
- Cron cada 30 min ──▶ GitHub Actions ──▶ API de EPM ──▶ avisos por Telegram ──▶ guarda el estado
+ Cron Trigger de Cloudflare (principal) ──repository_dispatch──┐
+ Cron de GitHub Actions (respaldo) ─────────────────────────────┴▶ GitHub Actions ──▶ API de EPM ──▶ avisos ──▶ guarda el estado
 ```
 
-**Ejecución por cron (cada 30 minutos):**
+**Ejecución de ofertas nuevas (cada ~30 minutos, ver [disparadores](#disparadores-de-la-revisión-de-ofertas-nuevas)):**
 1. **Restaura el estado** desde la rama `state`.
 2. **Consulta la API de EPM** (`recruitingCEJobRequisitions`, con paginación) y compara con los ids ya vistos. También guarda en `state` los datos públicos de cada oferta (audiencia y fechas, `seen.json.offers`) para que el botón de ofertas no tenga que pedir el detalle de EPM oferta por oferta (~0,45 s cada una).
 3. **Notifica por Telegram** las ofertas nuevas: a los chats autorizados y a los suscriptores, según el perfil que eligieron. Por cada oferta pide el detalle (`recruitingCEJobRequisitionDetails`) y envía título, ubicación, fecha, resumen, requisitos y enlace.
@@ -162,6 +163,19 @@ El bot **no corre de forma permanente**: lo ejecuta [GitHub Actions](.github/wor
 - Si hay un error (HTTP, parseo, Telegram), se imprime y se avisa al administrador por Telegram. Hay reintentos con *backoff* para errores de red, 5xx y 429.
 - **Si el script falla, el job falla de forma visible** (código ≠ 0) y **no se guarda estado**: nunca queda un `seen.json` a medias.
 - `timeout-minutes: 5` corta las ejecuciones que se cuelgan; el cron y las ejecuciones manuales nunca corren a la vez.
+
+### Disparadores de la revisión de ofertas nuevas
+
+La revisión de ofertas nuevas necesita que algo la arranque cada ~30 minutos. Hay dos disparadores, y **da igual que coincidan**:
+
+| | Disparador | Cuándo | Papel |
+|---|---|---|---|
+| **Principal** | **Cron Trigger del Worker de Cloudflare** → `repository_dispatch` con `event_type: cron_tick` | minutos 7 y 37 de cada hora (UTC) | Dispara con regularidad: primer tick real verificado el 2026-10-24 a las 10:37 UTC |
+| **Respaldo** | `schedule` de GitHub Actions | minutos 0 y 30 de cada hora (UTC) | GitHub puede retrasarlo mucho o no dispararlo |
+
+- **Sin permisos nuevos:** el Cron Trigger reutiliza el mismo token fine-grained del Worker (`GH_DISPATCH_TOKEN`, *Contents: Read and write*). `cron_tick` es solo un `event_type` propio.
+- **Sin avisos repetidos si coinciden:** todas las ejecuciones de ofertas comparten el grupo de `concurrency` `epm-cron` y se serializan; además una oferta ya registrada en `seen.json` (rama `state`) nunca se vuelve a avisar. Una ejecución pendiente puede ser reemplazada por otra más nueva del mismo grupo, y no se pierde nada, porque cada ejecución revisa todo el listado.
+- **Si el Worker falla:** sigue el cron de GitHub. **Si el cron de GitHub no dispara:** sigue el del Worker.
 
 ### El estado vive en la rama `state`
 
@@ -183,7 +197,7 @@ Es una rama huérfana que crea y actualiza el propio workflow (no se edita a man
 
 > ⚡ **Novedad (2026-10-24):** los comandos y botones ahora responden en **~15–30 segundos** (antes, hasta ~30 minutos). Sigue siendo **100 % gratis** (Cloudflare Workers + GitHub Actions) y **no depende de ningún computador encendido**.
 
-Antes, el bot solo leía los mensajes de Telegram cuando corría el cron. Ahora Telegram avisa por *webhook* a un [Worker de Cloudflare](worker/src/index.js), que dispara el workflow al instante con `repository_dispatch`. El cron de 30 minutos sigue siendo el respaldo y el que avisa de las ofertas nuevas.
+Antes, el bot solo leía los mensajes de Telegram cuando corría el cron. Ahora Telegram avisa por *webhook* a un [Worker de Cloudflare](worker/src/index.js), que dispara el workflow al instante con `repository_dispatch`. La revisión de ofertas nuevas (cada ~30 minutos) sigue siendo la que avisa de las ofertas nuevas y la que recoge los comandos pendientes si el webhook falla.
 
 ### ¿Por qué las respuestas tardan unos segundos?
 
@@ -268,7 +282,7 @@ Con el webhook desactivado, el cron vuelve a leer los mensajes con `getUpdates` 
 
 ### Si el Worker falla
 
-- **Ofertas nuevas:** no dependen del Worker; el cron las sigue enviando.
+- **Ofertas nuevas:** el aviso de ofertas no depende del webhook. Si el Worker cae, el cron de GitHub (respaldo) sigue revisando; si el cron de GitHub no dispara, lo hace el Cron Trigger del Worker.
 - **Worker o GitHub caídos, o token vencido:** Telegram reintenta la entrega y conserva los mensajes pendientes hasta 24 h. En su siguiente ejecución, el cron detecta `pending_update_count > 0` con un error reciente, **desactiva el webhook sin perder pendientes, reenvía cada mensaje al workflow como `repository_dispatch` (con el `GITHUB_TOKEN` del job, hasta 50 por corrida), vuelve a registrar el webhook** si hay `WEBHOOK_URL` y `TELEGRAM_WEBHOOK_SECRET`, y te avisa por Telegram.
 - Para diagnosticar, el Worker responde `502` con el código y el mensaje públicos de GitHub (por ejemplo `HTTP 403 Resource not accessible by personal access token`, que indica permisos del token insuficientes).
 
@@ -320,7 +334,7 @@ Variables de entorno (`.env` o entorno): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID
 
 ### Limitaciones
 
-- **Los schedules de GitHub no son exactos:** pueden retrasarse minutos, y más en horas pico. El mínimo permitido es 5 minutos; para ofertas laborales 30 minutos es suficiente.
+- **Los schedules de GitHub no son exactos ni fiables:** pueden retrasarse minutos u horas, y en este repositorio **no se disparó ninguna ejecución programada durante las primeras ~2,5 horas** de un workflow recién creado (2026-10-24: se saltó 5 slots seguidos, y solo corrieron las ejecuciones manuales y las de `repository_dispatch`). Por eso existe un segundo disparador (ver abajo). El mínimo permitido es 5 minutos; para ofertas laborales 30 minutos es suficiente.
 - **Comandos y botones: 11–25 s por ejecución (mediana 15 s, medido el 2026-10-24)**, no instantáneos: es el arranque del job de Actions. Dentro del bot se avisa con el aviso de «procesando». Cada comando o botón es una ejecución de Actions: aparecen en la pestaña Actions y consumen sus [límites gratuitos](https://docs.github.com/actions/administering-github-actions/usage-limits-billing-and-administration) (en repos públicos los minutos son ilimitados, pero hay un máximo de trabajos simultáneos). Si el Worker o GitHub fallan, el cron recoge los pendientes (ver [Si el Worker falla](#si-el-worker-falla)).
 - **Datos que pueden faltar:** la fecha límite y la audiencia solo vienen en el detalle de cada oferta. Si EPM no responde, la tarjeta sale con «No especificada» / «No determinado». «Dirigida a» es en parte una heurística (ver [Qué muestra cada oferta](#qué-muestra-cada-oferta)).
 - **Alcance:** solo se vigila el sitio `CX_1` («EPM Sitio»): 12 de las 20 ofertas que expone la API el 2026-10-24. Los sitios privados y de filiales no se vigilan.
@@ -387,6 +401,7 @@ El token solo vive en GitHub Secrets (o en `.env` para pruebas locales). `.env` 
 
 ## Historial de cambios
 
+- **2026-10-24 — Disparador de respaldo para la revisión de ofertas nuevas.** El cron de GitHub no se disparó en las primeras ~2,5 horas (5 slots seguidos), así que un Cron Trigger del Worker de Cloudflare lanza el workflow cada ~30 minutos (`cron_tick`). Reutiliza el token existente y no duplica avisos.
 - **2026-10-24 — Ofertas con título clicable, descripción breve, audiencia (servidores EPM / público general), fecha de publicación y fecha límite.** Una sola tarjeta para el botón de ofertas y para el aviso de oferta nueva, con fechas en hora de Bogotá, ofertas cerradas fuera del botón y una caché pública de audiencia y fechas en la rama `state`. Se corrigió un error del aviso de oferta nueva, que mostraba la fecha límite un día tarde por usarla en UTC.
 - **2026-10-24 — Aviso de procesamiento:** aviso flotante en botones, «escribiendo…» en comandos y botones, y nota en el menú, enviados por el Worker antes de que arranque el job.
 - **2026-10-24 — Respuesta rápida con Cloudflare Worker.** Se agregó un Worker de Cloudflare que recibe el webhook de Telegram y dispara el workflow con `repository_dispatch`: los comandos y botones pasan de responder en hasta ~30 minutos a **~15–30 segundos**, sin costo. El estado se guarda ahora de forma transaccional (una ejecución por update, reintento ante conflictos y deduplicación por `update_id`), y el cron de 30 minutos queda como respaldo y para los avisos de ofertas nuevas. Los logs de Actions ya no incluyen ids de chat ni comandos de usuarios.
