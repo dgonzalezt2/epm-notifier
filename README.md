@@ -2,6 +2,18 @@
 
 Consulta la API REST pública de Oracle HCM que usa la página de empleo de EPM y avisa por Telegram de las ofertas nuevas. Node.js 20+, sin dependencias.
 
+## Cómo se ve
+
+El bot (`/start` o `/comandos`) explica qué hace y ofrece un menú con botones.
+
+| Menú de inicio | Todas las ofertas | Elegir cómo filtrar |
+|---|---|---|
+| <img src="docs/screenshots/start.png" alt="Menú de inicio" width="260"> | <img src="docs/screenshots/ofertas.png" alt="Lista de ofertas abiertas" width="260"> | <img src="docs/screenshots/perfiles.png" alt="Perfiles: por carrera o por cargo" width="260"> |
+
+| Por carrera / área | Por cargo / nivel | Ayuda |
+|---|---|---|
+| <img src="docs/screenshots/perfilesCarrera.png" alt="Perfiles por carrera" width="260"> | <img src="docs/screenshots/perfilesCargo.png" alt="Perfiles por cargo y resultado" width="260"> | <img src="docs/screenshots/ayuda.png" alt="Ayuda y comandos" width="260"> |
+
 ## Cómo funciona
 - `GET /hcmRestApi/resources/latest/recruitingCEJobRequisitions` (finder `findReqs`, con paginación) lista las ofertas; `recruitingCEJobRequisitionDetails` da el detalle.
 - Compara con los IDs de `seen.json`. **Primera ejecución**: guarda las existentes sin notificar y envía "Notificador EPM activo".

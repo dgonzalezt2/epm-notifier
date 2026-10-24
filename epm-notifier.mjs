@@ -434,7 +434,21 @@ async function replyListing(chatId, label, jobs) {
 async function handleCommand(cmd, chatId) {
   cmd = cmd.toLowerCase();
   if (cmd === 'comandos' || cmd === 'menu' || cmd === 'start') {
-    return sendTelegram('<b>Menú EPM</b>\nElige una opción:', chatId, mainMenu());
+    return sendTelegram(
+      [
+        '👋 <b>Bot de ofertas de empleo EPM</b>',
+        'Reviso la página de empleo de EPM (Empresas Públicas de Medellín) y te aviso por aquí cuando salen ofertas nuevas.',
+        '',
+        '<b>¿En qué te puedo ayudar?</b>',
+        '📋 <b>Ofertas</b> — ver todas las ofertas abiertas ahora',
+        '🎯 <b>Perfiles</b> — filtrar por tu carrera (sistemas, civil, financiera…) o por cargo (profesional, tecnólogo, técnico…) y saber si hay algo para ti',
+        '❓ <b>Ayuda</b> — lista de comandos',
+        '',
+        '🔔 Cuando EPM publica una oferta nueva te llega un aviso automático con el cargo, la ubicación, los requisitos y el enlace para postularte.',
+      ].join('\n'),
+      chatId,
+      mainMenu(),
+    );
   }
   if (cmd === 'perfiles') {
     return sendTelegram('🎯 <b>Elige cómo filtrar</b>\nTe digo si hay ofertas abiertas para tu perfil:', chatId, profilesMenu());
