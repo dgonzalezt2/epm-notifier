@@ -645,6 +645,7 @@ async function handleCommand(cmd, chatId, ctx = {}) {
         '🔔 <b>Suscribirme</b> — recibir un aviso automático (cargo, ubicación, requisitos y enlace) cuando EPM publique ofertas nuevas, de todo o solo de tus perfiles',
         '❓ <b>Ayuda</b> — lista de comandos',
         '',
+        '⏳ <i>Las respuestas pueden tardar unos segundos. ¡Gracias por la paciencia!</i>',
         'ℹ️ <i>Proyecto personal y educativo, no oficial ni afiliado a EPM. Las postulaciones se hacen en la página de empleo de EPM.</i>',
       ].join('\n'),
       chatId,

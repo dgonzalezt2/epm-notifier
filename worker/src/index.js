@@ -2,8 +2,13 @@
 //
 //   Telegram --POST--> Worker --repository_dispatch--> GitHub Actions --> responde por Telegram
 //
-// Secrets (wrangler secret put): WEBHOOK_SECRET (el mismo secret_token de setWebhook) y GH_DISPATCH_TOKEN
-// (token fine-grained limitado a este repositorio). Este archivo no escribe NADA en logs: ni tokens ni mensajes.
+// Secrets (wrangler secret put): WEBHOOK_SECRET (el mismo secret_token de setWebhook), GH_DISPATCH_TOKEN
+// (token fine-grained limitado a este repositorio) y TELEGRAM_BOT_TOKEN (solo para el aviso de "procesando").
+// Este archivo no escribe NADA en logs: ni tokens ni mensajes.
+
+// Aviso de "procesando": el job de Actions tarda ~15 s en arrancar y responder, así que el Worker avisa al instante.
+const WAIT_TEXT = '⏳ Procesando… puede tardar unos segundos, ten paciencia';
+const TYPING_REPEAT_MS = 4500; // "escribiendo…" dura ~5 s: se repite una vez
 
 const MAX_BODY = 64 * 1024;
 const CHAT_TYPES = new Set(['private', 'group', 'supergroup']);
@@ -104,10 +109,46 @@ async function dispatch(env, update) {
   return last;
 }
 
+// Llamada a Telegram "dispara y olvida": cualquier error se ignora para no alterar la respuesta del Worker.
+async function telegram(env, method, payload) {
+  try {
+    await fetch(`${env.TELEGRAM_API || 'https://api.telegram.org'}/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(4000),
+    });
+  } catch {
+    // sin red, timeout o rate limit: no importa, la respuesta real la envía el job
+  }
+}
+
+// Un comando como "/start@otrobot" va dirigido a otro bot (grupos): se reenvía como siempre, pero sin aviso.
+function targetsOtherBot(text, env) {
+  const m = /^\/[A-Za-z0-9_]+@([A-Za-z0-9_]+)/.exec(text);
+  return !!m && !!env.BOT_USERNAME && m[1].toLowerCase() !== env.BOT_USERNAME.toLowerCase();
+}
+
+// Botones: aviso flotante (answerCallbackQuery) + "escribiendo…". Comandos: solo "escribiendo…".
+// La ruedita del botón se quita al responder el callback; por eso el texto del aviso explica la espera.
+async function feedback(env, slim) {
+  if (!env.TELEGRAM_BOT_TOKEN) return;
+  const q = slim.callback_query;
+  if (!q && targetsOtherBot(slim.message.text, env)) return;
+  const chatId = q ? q.message.chat.id : slim.message.chat.id;
+  const typing = () => telegram(env, 'sendChatAction', { chat_id: chatId, action: 'typing' });
+  await Promise.all([
+    q ? telegram(env, 'answerCallbackQuery', { callback_query_id: q.id, text: WAIT_TEXT, show_alert: false }) : null,
+    typing(),
+  ]);
+  await new Promise((resolve) => setTimeout(resolve, TYPING_REPEAT_MS));
+  await typing();
+}
+
 const reply = (status, body = '') => new Response(body, { status, headers: status === 405 ? { Allow: 'POST' } : undefined });
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     if (request.method !== 'POST') return reply(405);
 
     // 1) Autenticación ANTES de leer el cuerpo: sin el secret correcto no se hace nada más.
@@ -134,7 +175,11 @@ export default {
     const chatId = (slim.message?.chat || slim.callback_query.message.chat).id;
     if (limited(chatId, Date.now())) return reply(200, 'rate-limited');
 
-    // 5) Se ESPERA a GitHub: si falla se responde 502 y Telegram reintenta la entrega (el script deduplica por update_id).
+    // 5) Aviso de "procesando" EN PARALELO al dispatch: no lo retrasa ni cambia el resultado. Va en waitUntil solo para
+    //    que las llamadas a Telegram terminen tras responder; el dispatch NO depende de waitUntil.
+    ctx.waitUntil(feedback(env, slim).catch(() => {}));
+
+    // 6) Se ESPERA a GitHub: si falla se responde 502 y Telegram reintenta la entrega (el script deduplica por update_id).
     const r = await dispatch(env, slim);
     return r.ok ? reply(200, 'ok') : reply(502, `dispatch failed: HTTP ${r.status} ${r.message}`.trim());
   },
