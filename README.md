@@ -2,6 +2,19 @@
 
 Consulta la API REST pública de Oracle HCM que usa la página de empleo de EPM y avisa por Telegram de las ofertas nuevas. Node.js 20+, sin dependencias.
 
+## Pruébalo
+
+👉 **[Abrir el bot en Telegram: @epmofertasbot](https://t.me/epmofertasbot)** (o escanea el QR con la cámara de tu celular).
+
+<img src="docs/qr-bot.png" alt="QR de @epmofertasbot" width="220">
+
+1. Pulsa **Iniciar / Start**.
+2. Toca **🎯 Perfiles** para ver si hay ofertas de tu carrera o cargo.
+3. Toca **🔔 Suscribirme** y elige *todas las ofertas* o solo tus perfiles: te avisará cuando EPM publique algo nuevo.
+
+> El bot solo guarda el id de tu chat para enviarte los avisos. Puedes cancelarlos cuando quieras desde el mismo menú. Es un proyecto independiente, **no oficial ni afiliado a EPM**; las ofertas se postulan siempre en la página de empleo de EPM.
+> El bot responde mientras la instancia que lo ejecuta esté encendida.
+
 ## Cómo se ve
 
 El bot (`/start` o `/comandos`) explica qué hace y ofrece un menú con botones.
@@ -44,22 +57,18 @@ node epm-notifier.mjs --perfil sistemas   # o PERFIL=sistemas en .env / variable
 ```
 Perfiles disponibles: `sistemas`, `administracion`, `civil`, `electrica`, `mecanica`, `industrial`, `ambiental`, `financiera`, `juridica`, `talento`, `sst`, `comunicaciones`, `comercial` y `tecnico` (técnicos/tecnólogos/operarios). Se pueden combinar: `--perfil sistemas,civil`. Cada uno incluye términos afines (p. ej. `sistemas`: ingeniería de sistemas/informática/software, TI, desarrollador, datos, ciberseguridad, nube, telemática…) y los busca como palabra completa en título y descripción. Se combina con `KEYWORDS` (basta que cumpla una). Las ofertas que no pasan el filtro se marcan igualmente como vistas. Para añadir perfiles o términos, edita `PROFILES` en `epm-notifier.mjs`. En cron añade `--perfil sistemas` al comando; en K3s usa `PERFIL: sistemas` en el Secret.
 
-### Usarlo en un grupo o con otras personas
-`TELEGRAM_CHAT_ID` admite varios ids separados por coma; **el primero es el administrador** (tú). Las ofertas nuevas se envían a todos los chats autorizados y los comandos funcionan en cualquiera de ellos.
+### Usuarios, suscripciones y grupos
+Hay dos tipos de chats:
 
-**Grupo:**
-1. Añade el bot al grupo (en @BotFather puedes dejar `/setjoingroups` activado).
-2. En el grupo, escribe `/activar` **siendo tú el administrador**. El grupo queda autorizado y no hace falta reiniciar.
-3. Cualquier miembro puede usar `/comandos`, `/ofertas` y `/perfiles` allí. `/desactivar` lo quita.
+- **Público (cualquiera):** puede consultar (`/ofertas`, `/perfiles`, `/sistemas`…) y **suscribirse** con `/suscribir` (botón 🔔). Cada chat elige *todas las ofertas* o uno o varios perfiles y solo recibe lo suyo. Las suscripciones se guardan en `seen.json.subs` (solo el id del chat y los perfiles elegidos); si alguien bloquea el bot, su suscripción se elimina sola. Límite de suscriptores: `MAX_SUBS` (500 por defecto).
+- **Administrador y chats autorizados:** `TELEGRAM_CHAT_ID` admite varios ids separados por coma y **el primero es el administrador** (tú). Los chats autorizados reciben todas las ofertas nuevas (respetando `--perfil`/`KEYWORDS` si los usas) y los avisos de error solo te llegan a ti.
 
-**Otra persona (chat privado):**
-1. Que le escriba `/start` al bot: recibirá "Este chat no tiene acceso" con su **ID**.
-2. Tú, en tu chat privado con el bot, escribes `/agregar <id>`. `/quitar <id>` la elimina y `/chats` lista los autorizados.
+**Grupo:** añade el bot al grupo. Cualquier miembro puede consultar y suscribir *el grupo* con los botones. Si como administrador escribes `/activar` en el grupo, queda autorizado (recibe todo); `/desactivar` lo quita.
 
-Los chats añadidos así se guardan en `seen.json.chats` (junto al estado; en K3s va en el PVC). Los avisos de error solo te llegan a ti. Todos los chats reciben las mismas ofertas nuevas (el filtro `--perfil` es global); cada persona puede consultar su perfil con `/perfiles`.
+**Administración** (solo tú, en privado con el bot): `/agregar <id>`, `/quitar <id>` y `/chats` (lista los autorizados y cuenta los suscriptores). Los autorizados añadidos así se guardan en `seen.json.chats`. En K3s estos archivos van en el PVC.
 
 ### Comandos de Telegram
-Escríbele al bot: `/sistemas` (ofertas abiertas del perfil), `/ofertas` (todas), `/ayuda`. Solo responde al `TELEGRAM_CHAT_ID` configurado.
+Escríbele al bot: `/comandos` (menú), `/ofertas` (todas), `/perfiles`, `/suscribir`, `/sistemas` (ofertas abiertas de un perfil), `/ayuda`.
 - **Con cron/CronJob** los comandos se atienden en cada ejecución (hasta 20 min de retraso).
 - **Respuesta inmediata**: `node epm-notifier.mjs --listen` queda activo, responde al instante y revisa ofertas nuevas cada 20 min (no uses cron a la vez). En K3s aplica `k8s/deployment.yaml` en lugar del CronJob.
 

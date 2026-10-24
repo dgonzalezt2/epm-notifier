@@ -398,7 +398,10 @@ const PROFILE_LABELS = {
 const profileLabel = (p) => PROFILE_LABELS[p] || p;
 const btn = (text, data) => ({ text, callback_data: data });
 
-const mainMenu = () => [[btn('📋 Ofertas', 'ofertas'), btn('🎯 Perfiles', 'perfiles')], [btn('❓ Ayuda', 'ayuda')]];
+const mainMenu = () => [
+  [btn('📋 Ofertas', 'ofertas'), btn('🎯 Perfiles', 'perfiles')],
+  [btn('🔔 Suscribirme', 'suscribir'), btn('❓ Ayuda', 'ayuda')],
+];
 const profilesMenu = () => [
   [btn('🎓 Por carrera / área', 'areas')],
   [btn('🧱 Por cargo / nivel', 'cargos')],
@@ -430,8 +433,138 @@ async function replyListing(chatId, label, jobs) {
   if (msg) await sendTelegram(msg, chatId, backMenu());
 }
 
+// ---------- suscripciones: cualquiera puede suscribirse y elegir qué avisos recibir ----------
+// <STATE_FILE>.subs guarda { "<chatId>": { all: bool, profiles: [perfil, ...] } }. Solo se guarda el id del chat.
+const subsFile = `${cfg.stateFile}.subs`;
+const MAX_SUBS = Number(process.env.MAX_SUBS) || 500;
+const loadSubs = () => {
+  try {
+    return JSON.parse(readFileSync(subsFile, 'utf8'));
+  } catch {
+    return {};
+  }
+};
+const saveSubs = (subs) => {
+  const tmp = `${subsFile}.tmp`;
+  writeFileSync(tmp, JSON.stringify(subs));
+  renameSync(tmp, subsFile);
+};
+
+// what: 'all' | 'none' | nombre de perfil. Devuelve la suscripción resultante, 'full' si no hay cupo o null si no es válido.
+function toggleSub(id, what) {
+  const subs = loadSubs();
+  const key = String(id);
+  const s = subs[key] || { all: false, profiles: [] };
+  if (what === 'all') s.all = !s.all;
+  else if (what === 'none') {
+    s.all = false;
+    s.profiles = [];
+  } else if (PROFILES[what]) {
+    s.profiles = s.profiles.includes(what) ? s.profiles.filter((p) => p !== what) : [...s.profiles, what];
+  } else return null;
+  if (!s.all && !s.profiles.length) delete subs[key];
+  else {
+    if (!subs[key] && Object.keys(subs).length >= MAX_SUBS) return 'full';
+    subs[key] = s;
+  }
+  saveSubs(subs);
+  return s;
+}
+function dropSub(id) {
+  const subs = loadSubs();
+  if (subs[String(id)]) {
+    delete subs[String(id)];
+    saveSubs(subs);
+    log(`Suscripción eliminada (chat inaccesible): ${id}`);
+  }
+}
+
+function subSummary(id) {
+  const s = loadSubs()[String(id)];
+  if (!s) return 'Ahora mismo no recibes avisos.';
+  if (s.all) return 'Recibes <b>todas</b> las ofertas nuevas.';
+  return `Recibes las ofertas nuevas de: ${s.profiles.map((p) => esc(profileLabel(p).replace(/^\S+\s/, ''))).join(', ')}.`;
+}
+function subscribeMenu(id) {
+  const s = loadSubs()[String(id)] || { all: false, profiles: [] };
+  const mark = (on) => (on ? '✅ ' : '');
+  const rows = [[btn(`${mark(s.all)}📣 Todas las ofertas nuevas`, 'sub:all')]];
+  const names = Object.keys(PROFILES);
+  for (let i = 0; i < names.length; i += 2) {
+    rows.push(names.slice(i, i + 2).map((p) => btn(`${mark(s.profiles.includes(p))}${profileLabel(p)}`, `sub:${p}`)));
+  }
+  rows.push([btn('🔕 Cancelar avisos', 'unsub'), btn('⬅️ Menú', 'comandos')]);
+  return rows;
+}
+
+async function handleSubscription(cmd, chatId, ctx) {
+  let note = '';
+  if (cmd !== 'suscribir') {
+    const r = toggleSub(chatId, cmd === 'unsub' ? 'none' : cmd.slice(4));
+    if (r === 'full') note = '\n⚠️ El cupo de suscriptores está lleno por ahora.';
+  }
+  const text = `🔔 <b>Avisos de ofertas nuevas</b>\n${subSummary(chatId)}${note}\n\nToca para activar o quitar (✅ = activo). Puedes elegir varios perfiles.`;
+  const kb = subscribeMenu(chatId);
+  if (ctx.messageId) {
+    try {
+      return await tgCall('editMessageText', {
+        chat_id: chatId,
+        message_id: ctx.messageId,
+        text,
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: kb },
+      });
+    } catch (e) {
+      logErr('No se pudo editar el menú de suscripción:', e.message);
+    }
+  }
+  return sendTelegram(text, chatId, kb);
+}
+
+// Destinatarios de una oferta nueva: chats autorizados (si pasa el filtro global) + suscriptores cuyo perfil coincide.
+function recipientsFor(job) {
+  const out = new Set();
+  if (matchesKeywords(job)) {
+    const chats = allChats();
+    (chats.length ? chats : DRY ? ['dry'] : []).forEach((c) => out.add(String(c)));
+  }
+  for (const [id, s] of Object.entries(loadSubs())) {
+    if (s.all || (s.profiles || []).some((p) => PROFILES[p] && jobMatchesProfile(job, p))) out.add(id);
+  }
+  return [...out];
+}
+
+// Envía a cada destinatario; falla solo si no llegó a ninguno. Quita suscriptores que bloquearon el bot.
+async function deliver(html, recipients) {
+  let ok = 0;
+  let lastErr;
+  for (const c of recipients) {
+    try {
+      await sendTelegram(html, c);
+      ok++;
+    } catch (e) {
+      lastErr = e;
+      logErr(`No se pudo enviar a ${c}:`, e.message);
+      if (/blocked|chat not found|deactivated|kicked|not a member/i.test(e.message)) dropSub(c);
+    }
+    await sleep(60); // límite de Telegram: ~30 mensajes/s
+  }
+  if (!ok) throw lastErr;
+  return ok;
+}
+
+// Cache de 60 s del listado para las consultas de usuarios (evita saturar la API de EPM).
+let listingCache = { at: 0, jobs: null };
+async function cachedListing() {
+  if (listingCache.jobs && Date.now() - listingCache.at < 60000) return listingCache.jobs;
+  const jobs = await fetchListing();
+  listingCache = { at: Date.now(), jobs };
+  return jobs;
+}
+
 // cmd: nombre sin "/" (viene de un comando escrito o del callback_data de un botón)
-async function handleCommand(cmd, chatId) {
+// ctx.messageId: mensaje del botón pulsado (permite editar el menú de suscripción en el sitio)
+async function handleCommand(cmd, chatId, ctx = {}) {
   cmd = cmd.toLowerCase();
   if (cmd === 'comandos' || cmd === 'menu' || cmd === 'start') {
     return sendTelegram(
@@ -442,9 +575,8 @@ async function handleCommand(cmd, chatId) {
         '<b>¿En qué te puedo ayudar?</b>',
         '📋 <b>Ofertas</b> — ver todas las ofertas abiertas ahora',
         '🎯 <b>Perfiles</b> — filtrar por tu carrera (sistemas, civil, financiera…) o por cargo (profesional, tecnólogo, técnico…) y saber si hay algo para ti',
+        '🔔 <b>Suscribirme</b> — recibir un aviso automático (cargo, ubicación, requisitos y enlace) cuando EPM publique ofertas nuevas, de todo o solo de tus perfiles',
         '❓ <b>Ayuda</b> — lista de comandos',
-        '',
-        '🔔 Cuando EPM publica una oferta nueva te llega un aviso automático con el cargo, la ubicación, los requisitos y el enlace para postularte.',
       ].join('\n'),
       chatId,
       mainMenu(),
@@ -459,18 +591,20 @@ async function handleCommand(cmd, chatId) {
   if (cmd === 'cargos') {
     return sendTelegram('🧱 <b>Cargo / nivel</b>\nElige uno:', chatId, profileGrid(CARGO_PROFILES));
   }
+  if (cmd === 'suscribir' || cmd === 'unsub' || cmd.startsWith('sub:')) {
+    return handleSubscription(cmd, chatId, ctx);
+  }
   if (cmd === 'ayuda' || cmd === 'help') {
     return sendTelegram(
       [
         '<b>Comandos</b>',
         '/comandos — menú con botones',
         '/ofertas — todas las ofertas abiertas',
-        '/perfiles — elegir un rol y ver sus ofertas',
+        '/perfiles — filtrar por carrera o por cargo',
+        '/suscribir — elegir qué avisos de ofertas nuevas recibir',
         '/ayuda — esta ayuda',
         '',
         `También puedes escribir el perfil directo: ${Object.keys(PROFILES).map((p) => '/' + p).join(' ')}`,
-        '',
-        'Te aviso automáticamente cuando aparezcan ofertas nuevas.',
       ].join('\n'),
       chatId,
       mainMenu(),
@@ -480,7 +614,7 @@ async function handleCommand(cmd, chatId) {
     return sendTelegram('Comando no reconocido. Usa /comandos.', chatId, mainMenu());
   }
   try {
-    const jobs = await fetchListing();
+    const jobs = await cachedListing();
     if (cmd === 'ofertas') return await replyListing(chatId, 'Todas las ofertas', jobs);
     return await replyListing(chatId, `Perfil ${profileLabel(cmd).replace(/^\S+\s/, '')}`, jobs.filter((j) => jobMatchesProfile(j, cmd)));
   } catch (e) {
@@ -503,24 +637,6 @@ const extraChats = () => {
 const saveExtraChats = (list) => writeFileSync(chatsFile, JSON.stringify([...new Set(list)]));
 const allChats = () => [...new Set([...cfg.chatIds, ...extraChats()])];
 
-// Envía a todos los chats autorizados; falla solo si no llegó a ninguno.
-async function broadcast(html) {
-  const chats = allChats();
-  if (DRY || !chats.length) return sendTelegram(html);
-  let ok = 0;
-  let lastErr;
-  for (const c of chats) {
-    try {
-      await sendTelegram(html, c);
-      ok++;
-    } catch (e) {
-      lastErr = e;
-      logErr(`No se pudo enviar a ${c}:`, e.message);
-    }
-  }
-  if (!ok) throw lastErr;
-}
-
 // Menú desplegable que Telegram muestra al escribir "/" (se registra una vez por proceso).
 let commandsRegistered = false;
 let botName = '';
@@ -534,6 +650,7 @@ async function registerCommands() {
         { command: 'comandos', description: 'Menú con botones' },
         { command: 'ofertas', description: 'Ver ofertas activas' },
         { command: 'perfiles', description: 'Elegir carrera o cargo y ver sus ofertas' },
+        { command: 'suscribir', description: 'Recibir avisos de ofertas nuevas' },
         { command: 'ayuda', description: 'Ayuda' },
       ],
     });
@@ -567,7 +684,7 @@ async function handleAdminCommand(cmd, rest, chat, isAdmin) {
   if (cmd === 'agregar' || cmd === 'quitar' || cmd === 'chats') {
     if (!isAdmin || chat.type !== 'private') return deny('Solo el administrador, en chat privado con el bot.');
     if (cmd === 'chats') {
-      await reply(`<b>Chats con acceso</b>\n${allChats().map((c) => `• <code>${esc(c)}</code>${c === cfg.chatId ? ' (admin)' : ''}`).join('\n')}`);
+      await reply(`<b>Chats con acceso</b>\n${allChats().map((c) => `• <code>${esc(c)}</code>${c === cfg.chatId ? ' (admin)' : ''}`).join('\n')}\n\n🔔 Suscriptores: ${Object.keys(loadSubs()).length}`);
       return true;
     }
     const target = (rest[0] || '').trim();
@@ -584,7 +701,7 @@ async function handleAdminCommand(cmd, rest, chat, isAdmin) {
   return false;
 }
 
-// Procesa mensajes y botones pendientes de los chats autorizados.
+// Procesa mensajes y botones pendientes (las consultas están abiertas a cualquier chat).
 async function pollCommands(timeout = 0) {
   await registerCommands();
   let offset = loadOffset();
@@ -599,7 +716,6 @@ async function pollCommands(timeout = 0) {
       const cq = u.callback_query;
       const chat = m?.chat || cq?.message?.chat;
       if (!chat) continue;
-      const authorized = allChats().includes(String(chat.id));
       const isAdmin = String((m?.from || cq?.from)?.id) === cfg.chatId;
       if (m?.text?.startsWith('/')) {
         const [rawCmd, ...rest] = m.text.slice(1).split(/\s+/);
@@ -608,17 +724,11 @@ async function pollCommands(timeout = 0) {
         const cmd = name.toLowerCase();
         log(`Comando recibido: /${cmd} (chat ${chat.id})`);
         if (await handleAdminCommand(cmd, rest, chat, isAdmin)) continue;
-        if (authorized) await handleCommand(cmd, chat.id);
-        else {
-          await sendTelegram(
-            `🔒 Este chat no tiene acceso al bot.\nID del chat: <code>${esc(chat.id)}</code>\nEl administrador puede activarlo con /activar (en un grupo) o /agregar ${esc(chat.id)}.`,
-            chat.id,
-          );
-        }
-      } else if (cq && authorized) {
+        await handleCommand(cmd, chat.id);
+      } else if (cq) {
         log(`Botón pulsado: ${cq.data} (chat ${chat.id})`);
         await tgCall('answerCallbackQuery', { callback_query_id: cq.id }).catch(() => {});
-        await handleCommand(String(cq.data || ''), chat.id);
+        await handleCommand(String(cq.data || ''), chat.id, { messageId: cq.message.message_id });
       }
     } catch (e) {
       logErr('Error atendiendo actualización:', e.message);
@@ -690,17 +800,18 @@ async function checkNew() {
   let failed = null;
   for (const job of fresh) {
     try {
-      if (matchesKeywords(job)) {
+      const recipients = recipientsFor(job);
+      if (recipients.length) {
         let detail = null;
         try {
           detail = await fetchDetail(job.Id);
         } catch (e) {
           logErr(`Detalle ${job.Id} no disponible, uso datos del listado: ${e.message}`);
         }
-        await broadcast(buildMessage(job, detail));
-        log(`Notificada ${job.Id}: ${job.Title}`);
+        const delivered = await deliver(buildMessage(job, detail), recipients);
+        log(`Notificada ${job.Id} a ${delivered}/${recipients.length}: ${job.Title}`);
       } else {
-        log(`Omitida por KEYWORDS ${job.Id}: ${job.Title}`);
+        log(`Sin destinatarios ${job.Id}: ${job.Title}`);
       }
       seen.add(String(job.Id));
       saveState(seen); // guarda tras cada oferta: un fallo a medias no genera duplicados
