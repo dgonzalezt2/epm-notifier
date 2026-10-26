@@ -67,12 +67,18 @@ export function makeDb(env) {
     },
     pruneOffersStmt(keepIds) {
       if (!keepIds.length) return stmt('DELETE FROM offers');
-      return stmt(`DELETE FROM offers WHERE id NOT IN (${keepIds.map(() => '?').join(',')})`, ...keepIds);
+      return stmt('DELETE FROM offers WHERE id NOT IN (SELECT value FROM json_each(?))', JSON.stringify(keepIds));
     },
 
     // ---- vistas ----
-    async seenRows() {
-      return all('SELECT id, first_seen, status, attempts FROM seen');
+    // Estado de las ofertas del listado en UNA consulta (json_each: un solo parámetro, sin el tope de 100 de D1): solo las filas
+    // de esos ids, así el coste no crece con el histórico. `cached` indica si ya hay datos en la caché de ofertas.
+    async seenFor(ids) {
+      if (!ids.length) return [];
+      return all(
+        'SELECT s.id, s.first_seen, s.status, s.attempts, o.id IS NOT NULL AS cached FROM seen s LEFT JOIN offers o ON o.id = s.id WHERE s.id IN (SELECT value FROM json_each(?))',
+        JSON.stringify(ids),
+      );
     },
     seenClaimStmt(id, now, status = 'pending') {
       return stmt('INSERT OR IGNORE INTO seen (id, first_seen, status, attempts) VALUES (?, ?, ?, 0)', String(id), now, status);
@@ -207,15 +213,18 @@ export function makeDb(env) {
       ]);
     },
     // Una sola escritura por invocación que ya escribe estado.
-    async flushUsage() {
+    usageStmt() {
       const day = new Date().toISOString().slice(0, 10);
-      await run(
+      return stmt(
         `INSERT INTO usage (day, updates, cron_runs, tg_sends, errors, limit_hits, d1_reads, d1_writes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(day) DO UPDATE SET updates = updates + excluded.updates, cron_runs = cron_runs + excluded.cron_runs,
            tg_sends = tg_sends + excluded.tg_sends, errors = errors + excluded.errors, limit_hits = limit_hits + excluded.limit_hits,
            d1_reads = d1_reads + excluded.d1_reads, d1_writes = d1_writes + excluded.d1_writes + 1`,
         day, stats.updates, stats.cron_runs, stats.sends, stats.errors, stats.limit_hits, stats.reads, stats.writes,
       );
+    },
+    async flushUsage() {
+      acct(await db.usageStmt().run());
     },
     async usageRows(days = 2) {
       return all('SELECT * FROM usage ORDER BY day DESC LIMIT ?', days);

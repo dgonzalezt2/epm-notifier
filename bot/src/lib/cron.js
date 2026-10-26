@@ -48,15 +48,14 @@ export async function runCron(c, { dry = false, forceBackup = false } = {}) {
     return { error: e.message, fails: n };
   }
 
-  const [seenRows, offerRows] = await Promise.all([db.seenRows(), db.all('SELECT id FROM offers')]);
-  const seen = new Map(seenRows.map((r) => [r.id, r]));
-  const haveOffer = new Set(offerRows.map((r) => r.id));
-  const now = Date.now();
   const byId = new Map(jobs.map((j) => [String(j.Id), j]));
+  const seenRows = await db.seenFor([...byId.keys()]);
+  const seen = new Map(seenRows.map((r) => [r.id, r]));
+  const now = Date.now();
 
   const fresh = jobs.filter((j) => !seen.has(String(j.Id)));
-  const retry = seenRows.filter((r) => r.status === 'pending' && byId.has(r.id) && now - r.first_seen > PENDING_MS && r.attempts < MAX_ATTEMPTS);
-  const fill = jobs.filter((j) => seen.get(String(j.Id))?.status === 'done' && !haveOffer.has(String(j.Id))).slice(0, MAX_FILL);
+  const retry = seenRows.filter((r) => r.status === 'pending' && now - r.first_seen > PENDING_MS && r.attempts < MAX_ATTEMPTS);
+  const fill = jobs.filter((j) => seen.get(String(j.Id))?.status === 'done' && !seen.get(String(j.Id)).cached).slice(0, MAX_FILL);
 
   const msgs = [
     ...fresh.map((j) => ({ body: { t: 'offer', id: String(j.Id), job: jobFromListing(j), notify: true } })),
@@ -85,7 +84,10 @@ export async function runCron(c, { dry = false, forceBackup = false } = {}) {
   if (backupDue) {
     stmts.push(db.stmt("INSERT INTO meta (k, v) VALUES ('last_backup', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", today));
   }
-  if (stmts.length) await db.batch(stmts);
+  // el contador de uso viaja en la misma escritura atómica (una consulta menos por ejecución)
+  db.stats.cron_runs = 1;
+  stmts.push(db.usageStmt());
+  await db.batch(stmts);
   if (backupDue) await db.prune();
 
   if (meta.cmds !== 'v2') {
@@ -96,7 +98,5 @@ export async function runCron(c, { dry = false, forceBackup = false } = {}) {
       await db.event('error', `registro de comandos: ${e.message}`);
     }
   }
-  db.stats.cron_runs = 1;
-  await db.flushUsage();
   return { ...summary, d1: { reads: db.stats.reads, writes: db.stats.writes, queries: db.stats.queries } };
 }
