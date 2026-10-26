@@ -13,7 +13,7 @@ BOT_USERNAME = "epmofertasbot"
 
 # Disparador de respaldo del cron de ofertas nuevas (minutos 7 y 37 de cada hora, UTC): no coincide con el de GitHub (:00 y :30).
 [triggers]
-crons = ["7,37 * * * *"]
+crons = []
 
 # Sin logs de peticiones: el Worker no registra tokens ni contenido de mensajes.
 [observability]

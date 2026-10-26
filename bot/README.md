@@ -9,8 +9,8 @@ Cron */30  ──────▶ scheduled()  consulta EPM, compara con D1 y enc
 Cola       ──────▶ queue()      detalle de la oferta, tarjeta y reparto de avisos (CPU holgada, ≤35 envíos por mensaje)
 ```
 
-> Estado: **desplegado y probado, pero sin activar**. Mientras `live = 0` en D1 el cron no avisa nada y el webhook de Telegram sigue
-> apuntando al sistema anterior (`worker/` + GitHub Actions). Ver [Corte](#corte-activar-el-sistema-nuevo) y [Vuelta atrás](#vuelta-atrás).
+> Estado: **activo desde el 2026-10-26.** El webhook de Telegram apunta a este Worker y `live = 1` en D1. El sistema anterior (`worker/` + GitHub Actions)
+> queda desactivado pero sin borrar. Ver [Corte](#corte-activar-el-sistema-nuevo) y [Vuelta atrás](#vuelta-atrás).
 
 ## Límites del plan gratuito (documentación de Cloudflare) y medidas reales
 
@@ -26,7 +26,7 @@ Cola       ──────▶ queue()      detalle de la oferta, tarjeta y re
 | Cron Triggers | 5 por cuenta (se usa 1) | Tarda hasta 15 min en propagarse tras desplegar. |
 
 Medido en Cloudflare con un Worker de prueba (después borrado): EPM responde desde su red (0 bloqueos en 4 pruebas); D1 ~25 ms por lectura y ~42 ms por escritura;
-25 incrementos simultáneos dieron exactamente +25; el consumidor de la cola admitió 124 ms de CPU (HTTP y Cron: 10 ms); PBKDF2 con 200.000 iteraciones **no cabe** en 10 ms
+25 incrementos simultáneos dieron exactamente +25; el consumidor de la cola admitió 124 ms de CPU (HTTP y Cron: 10 ms); en producción procesar una oferta real cuesta 13–26 ms (la primera de una ráfaga) y 6–8 ms (las siguientes), con resultado correcto; PBKDF2 con 200.000 iteraciones **no cabe** en 10 ms
 (por eso el cifrado usa HKDF); 12 ofertas procesadas de golpe cuestan 4–13 ms de CPU en frío (por eso el procesamiento va a la cola).
 
 ### Consumo de D1 por operación (medido)
@@ -75,15 +75,14 @@ node scripts/load-secrets.mjs
 El `database_id` es un identificador (sin un token de tu cuenta no sirve para nada), pero se mantiene fuera del repositorio.
 
 ## Corte: activar el sistema nuevo
-Pruebas previas (todas con el secreto, sin tocar nada): `POST /admin/tick?dry=1` (ve qué haría el cron) y una petición firmada de `/start` al Worker nuevo.
+Orden seguido el 2026-10-26 (nunca hay dos sistemas respondiendo ni avisando a la vez). Pruebas previas, sin tocar nada: `POST /admin/tick?dry=1` y una petición firmada de `/start`.
 
-1. **Desactivar los disparadores viejos** para que haya un solo sistema que avise: quitar `schedule` y `repository_dispatch` de `.github/workflows/epm-notifier.yml` y el bloque
-   `[triggers]` de `worker/wrangler.toml` (después `npx wrangler deploy` en `worker/`). Esperar a que termine cualquier ejecución en curso.
-2. **Resincronizar las ofertas vistas** (por si el sistema viejo avisó algo desde la migración):
-   `node bot/scripts/migrate-state.mjs --seen-only --out /tmp/seen.sql && npx wrangler d1 execute epm-bot-db -c wrangler.local.toml --remote --file /tmp/seen.sql`
-3. **Activar:** `npx wrangler d1 execute epm-bot-db -c wrangler.local.toml --remote --command "UPDATE meta SET v='1' WHERE k='live'"`
-4. **Apuntar el webhook:** `node epm-notifier.mjs --set-webhook=https://epm-bot.<subdominio>.workers.dev` (usa `TELEGRAM_WEBHOOK_SECRET` del entorno; `drop_pending_updates=false`).
-5. Comprobar: `/start`, un botón, `node epm-notifier.mjs --webhook-info` (activo, 0 pendientes) y `GET /admin/status`.
+1. **Resincronizar las ofertas vistas** con `live = 0`:
+   `node bot/scripts/migrate-state.mjs --seen-only --from-ref origin/state --out <seen.sql>` y `npx wrangler d1 execute epm-bot-db -c wrangler.local.toml --remote --file <seen.sql>`
+2. **Apuntar el webhook** (todavía con `live = 0`: responde pero no avisa): `node epm-notifier.mjs --set-webhook=https://epm-bot.<subdominio>.workers.dev`. Probar `/start`, un botón y `/ofertas` desde Telegram.
+3. **Desactivar los disparadores viejos:** `gh workflow disable epm-notifier.yml` y `crons = []` en `worker/wrangler.toml` (`npx wrangler deploy` en `worker/`). Esperar a que termine cualquier ejecución en curso y comprobar `--webhook-info`, `/admin/status` y `gh workflow list --all`.
+4. **Resincronizar de nuevo y activar:** repetir el paso 1 y `UPDATE meta SET v='1' WHERE k='live'`.
+5. **Verificar** el primer tick real del cron (`wrangler tail`): sin errores, sin avisos repetidos y sin datos sensibles.
 
 ## Vuelta atrás
 1. `UPDATE meta SET v='0' WHERE k='live'` (el cron nuevo deja de avisar).
