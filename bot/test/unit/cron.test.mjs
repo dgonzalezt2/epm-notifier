@@ -22,7 +22,7 @@ async function world(freshIds) {
   const D = makeD1();
   const queue = [];
   const sends = [];
-  const world = { D, queue, sends, failSend: new Set(), jobsFail: false };
+  const world = { D, queue, sends, failSend: new Set(), jobsFail: false, env: null };
   const env = {
     DB: D,
     EPM_API: 'http://epm.test',
@@ -35,6 +35,7 @@ async function world(freshIds) {
       send: async (m) => queue.push({ body: m.body ?? m, attempts: 0 }),
     },
   };
+  world.env = env;
   const db = makeDb(env);
   const vault = await makeVault('clave-de-prueba-larga-y-aleatoria-0123456789');
   for (const s of SUBS) await db.putSub(vault, s, { all: true, profiles: [] }, 0);
@@ -102,6 +103,19 @@ describe('cron: solo ids, comparación en memoria', () => {
     assert.equal(r1.fresh, 1);
     assert.deepEqual(w1.queue.map((m) => m.body.id), [IDS[0]]);
     assert.equal(w1.rows('SELECT status FROM seen WHERE id = ?', IDS[0])[0].status, 'pending');
+  });
+});
+
+describe('respaldo automático inerte por defecto', () => {
+  test('sin BACKUP_ENABLED ni el domingo ni el forzado encolan un respaldo; con BACKUP_ENABLED = 1 sí', async () => {
+    const w = await world([]);
+    const r = await runCron({ env: w.env, db: makeDb(w.env), budget: new Budget(45), tg: { call: async () => {}, send: async () => {} } }, { forceBackup: true });
+    assert.equal(r.backupDue, false);
+    assert.equal(w.queue.length, 0);
+    const env2 = { ...w.env, BACKUP_ENABLED: '1' };
+    const r2 = await runCron({ env: env2, db: makeDb(env2), budget: new Budget(45), tg: { call: async () => {}, send: async () => {} } }, { forceBackup: true });
+    assert.equal(r2.backupDue, true);
+    assert.deepEqual(w.queue.map((m) => m.body.t), ['backup']);
   });
 });
 

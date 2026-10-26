@@ -11,3 +11,6 @@ bot/wrangler.local.toml
 bot/.wrangler/
 bot/.dev.vars
 bot/node_modules/
+
+# Copias locales de D1 (bot/scripts/backup-local.mjs): contienen la base completa, nunca al repositorio
+bot/backups/

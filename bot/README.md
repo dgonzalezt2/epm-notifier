@@ -57,7 +57,7 @@ así que ni el chat id ni los perfiles elegidos están en claro en D1. Los cambi
 | `WEBHOOK_SECRET` | Valida `X-Telegram-Bot-Api-Secret-Token` (y las rutas `/admin/*`) |
 | `STATE_KEY` | Cifrado del estado y de los respaldos |
 | `TELEGRAM_CHAT_ID` | Administrador (el primero de la lista) |
-| `GH_BACKUP_TOKEN` | Opcional: token fine-grained con *Contents: Read and write* sobre este repo, para el respaldo semanal |
+| `GH_BACKUP_TOKEN` | **No se usa** (respaldo automático desactivado). Solo haría falta para reactivarlo: token fine-grained con *Contents: Read and write* sobre este repo |
 
 `node bot/scripts/load-secrets.mjs` los carga desde tu `.env` sin imprimirlos.
 
@@ -94,8 +94,31 @@ Orden seguido el 2026-10-26 (nunca hay dos sistemas respondiendo ni avisando a l
 La rama `state` no se toca en ningún otro momento: queda como respaldo del estado anterior.
 
 ## Respaldo
-Cada domingo (~03:00 UTC) el cron encola un respaldo: toda D1 en un archivo **cifrado** (AES-GCM) subido a la rama `d1-backup` con la API de contenidos de GitHub
-(se conservan los últimos 8). Sin `GH_BACKUP_TOKEN` se omite y quedan los 7 días de Time Travel (`wrangler d1 time-travel restore`). Forzarlo: `POST /admin/tick?backup=1`.
+**El respaldo automático semanal está desactivado** (`BACKUP_ENABLED = "0"`): ni el cron del domingo ni `/admin/tick?backup=1` encolan nada, y el consumidor ignora un mensaje `backup` aunque llegara. Motivos: el repositorio es público (los archivos cifrados quedarían en el historial para siempre y su seguridad dependería solo de `STATE_KEY`) y el token necesario (*Contents: Read and write*) también podría escribir en `main`. El código ([src/lib/backup.js](src/lib/backup.js)) se conserva y sigue cubierto por las pruebas.
+
+Quedan dos protecciones: **Time Travel** de D1 (7 días: `npx wrangler d1 time-travel restore epm-bot-db -c wrangler.local.toml --timestamp <ISO>`) y la **copia local**.
+
+### Copia local a demanda
+```bash
+node bot/scripts/backup-local.mjs            # opciones: --keep 12  --out <carpeta ignorada por git>  --db epm-bot-db  -c wrangler.local.toml
+```
+Ejecuta `wrangler d1 export` y guarda `bot/backups/d1-AAAA-MM-DD-HHMM.sql` (carpeta ignorada por git; el script se niega a escribir en una que no lo esté), comprueba que tiene las cinco tablas y conserva las últimas 12. Notas:
+- Contiene **toda** la base: las ofertas son públicas, pero suscriptores y chats van **cifrados** con `STATE_KEY` (el chat id no aparece en claro). Aun así, trátala como sensible: no la subas a ningún sitio.
+- **Sin `STATE_KEY` la copia no sirve para recuperar suscriptores.** Guárdala por separado (gestor de contraseñas).
+- Mientras dura la exportación D1 bloquea las consultas (con esta base, una fracción de segundo). Conviene hacerla de vez en cuando, por ejemplo cada semana y antes de cualquier cambio de esquema.
+- Es manual: no hay nada que corra solo.
+
+### Restaurar una copia
+Lo más seguro es restaurar en una base **nueva**, sin tocar la actual:
+1. `npx wrangler d1 create epm-bot-restore` (anota su `database_id` en `wrangler.local.toml`, nunca en el repositorio).
+2. `npx wrangler d1 execute epm-bot-restore -c wrangler.local.toml --remote --file bot/backups/d1-AAAA-MM-DD-HHMM.sql` (el archivo trae el esquema y los datos).
+3. Comprueba los recuentos (`SELECT COUNT(*) FROM subs`…). Para usarla, cambia `database_name` y `database_id` en `wrangler.local.toml` y `npx wrangler deploy -c wrangler.local.toml`. La `STATE_KEY` del Worker debe ser la misma con que se cifró.
+4. La base antigua no se borra hasta confirmar que todo funciona.
+
+Restaurar sobre la base actual no funciona tal cual (las tablas ya existen); para eso usa Time Travel. La restauración se probó con una copia real en una base local vacía: mismos recuentos y `live` conservado.
+
+### Reactivar el automático (no recomendado)
+Crea un token fine-grained solo para este repositorio, con *Contents: Read and write* y caducidad corta, cárgalo con `node scripts/load-secrets.mjs` (`GH_BACKUP_TOKEN` en `.env`), pon `BACKUP_ENABLED = "1"` en `[vars]` de `wrangler.local.toml` y despliega. Cada domingo (~03:00 UTC) subirá un archivo cifrado a la rama `d1-backup` (se conservan los últimos 8); `POST /admin/tick?backup=1` lo fuerza.
 
 ## Pruebas
 ```bash

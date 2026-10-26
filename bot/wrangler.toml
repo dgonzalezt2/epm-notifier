@@ -15,6 +15,8 @@ TELEGRAM_API = "https://api.telegram.org"
 GITHUB_API = "https://api.github.com"
 GITHUB_REPO = "dgonzalezt2/epm-notifier"
 MAX_SUBS = "500"
+# Respaldo semanal a la rama d1-backup: DESACTIVADO (historial público y token con permiso amplio). Ver README. "1" lo activa (requiere GH_BACKUP_TOKEN).
+BACKUP_ENABLED = "0"
 
 [[d1_databases]]
 binding = "DB"

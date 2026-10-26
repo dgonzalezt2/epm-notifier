@@ -65,7 +65,9 @@ export async function runCron(c, { dry = false, forceBackup = false } = {}) {
 
   const d = new Date(now);
   const today = d.toISOString().slice(0, 10);
-  const backupDue = forceBackup || (d.getUTCDay() === 0 && d.getUTCHours() === 3 && d.getUTCMinutes() < 30 && meta.last_backup !== today);
+  // Respaldo automático DESACTIVADO por defecto (ver README): solo corre con la variable BACKUP_ENABLED = "1" (y GH_BACKUP_TOKEN).
+  const backupOn = env.BACKUP_ENABLED === '1';
+  const backupDue = backupOn && (forceBackup || (d.getUTCDay() === 0 && d.getUTCHours() === 3 && d.getUTCMinutes() < 30 && meta.last_backup !== today));
   const summary = { listing: jobs.length, fresh: fresh.length, retry: retry.length, fill: fill.length, backupDue, ids: { fresh: fresh.map((j) => String(j.Id)) } };
   if (dry) return { dry: true, ...summary };
 

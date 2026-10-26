@@ -116,5 +116,5 @@ export async function consume(c, msg) {
   const b = msg.body;
   if (b?.t === 'offer') return processOffer(c, b);
   if (b?.t === 'notify') return processNotify(c, b);
-  if (b?.t === 'backup') return doBackup(c);
+  if (b?.t === 'backup') return c.env.BACKUP_ENABLED === '1' ? doBackup(c) : undefined; // inerte salvo BACKUP_ENABLED = "1"
 }

@@ -123,6 +123,7 @@ export async function startWorker(extraVars = {}) {
     STATE_KEY,
     TELEGRAM_CHAT_ID: String(ADMIN),
     GH_BACKUP_TOKEN: 'ghp_FAKE_BACKUP_TOKEN',
+    BACKUP_ENABLED: '1', // en producción está desactivado; aquí se prueba que el código sigue funcionando
     EPM_API: `http://127.0.0.1:${PORTS.epm}`,
     TELEGRAM_API: `http://127.0.0.1:${PORTS.tg}`,
     GITHUB_API: `http://127.0.0.1:${PORTS.gh}`,

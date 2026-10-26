@@ -153,7 +153,7 @@ Todo corre en **Cloudflare, plan gratuito, sin tarjeta**: un [Worker](bot/src/in
 - **Orden seguro del estado.** Una oferta solo se marca como vista **después** de encolar su aviso. Si el cron se corta justo antes, la siguiente ejecución la vuelve a detectar (no se pierde); si se corta justo después de encolar, puede encolarla dos veces, pero **nadie recibe dos avisos**: cada par (oferta, destinatario) se reclama en D1 *antes* de enviar y un reintento solo envía a quien falló. Está cubierto por pruebas ([cron.test.mjs](bot/test/unit/cron.test.mjs)).
 - **Estado en D1**, con suscriptores y chats **cifrados** (AES-GCM con claves derivadas de `STATE_KEY`; la clave de fila es un HMAC del chat, así que ni el chat id ni los perfiles están en claro). Cambios con control de versión y elecciones absolutas: repetir una pulsación no hace daño.
 - **Deduplicación por `update_id`** para los cambios de estado, límite por chat (8 updates cada 10 s) y 5xx solo si falló algo y no se envió nada (Telegram reintenta); los límites de D1 se contestan con 200 para no provocar reintentos en cadena.
-- **Respaldo semanal cifrado** de D1 a la rama huérfana `d1-backup` (requiere `GH_BACKUP_TOKEN`, ver [pendientes](#pendientes-y-riesgos)), además de los 7 días de Time Travel de D1.
+- **Respaldos:** los 7 días de Time Travel de D1 y una **copia local a demanda** (`node bot/scripts/backup-local.mjs`, a una carpeta ignorada por git). El respaldo automático semanal a GitHub está **desactivado** (ver [Respaldos](#respaldos)).
 - **Sin datos en logs:** observabilidad desactivada y los errores solo registran su nombre. Se revisó el `wrangler tail` de producción: ningún token, clave ni chat id.
 
 ### Cifras medidas en Cloudflare
@@ -178,7 +178,7 @@ Cómo leer la tabla:
 - **La cola supera 10 ms y termina bien en el plan gratuito** (13–26 ms medidos, resultado `ok`). La documentación de Queues indica 30 s de CPU por defecto para el consumidor en los dos planes, aunque la página general de límites de Workers no lista un límite para consumidores. Se mantiene el diseño prudente: un mensaje (una oferta) por invocación y avisos de ≤35 destinatarios, por si el límite cambiara.
 - **Margen del cron: 2–5 ms.** Es la cifra ajustada del sistema; los ticks reales están entre 5 y 8 ms y el de 10 ms fue el único que registró los comandos. Si algún día pasara de 9 ms, lo primero que se recortaría es el borrado de ofertas caducadas (`DELETE … NOT IN`) y la escritura del contador de uso en los ticks sin novedades.
 - **Cuotas diarias:** un tick lee ~80–90 filas de D1 y escribe 1–7. A 48 ticks/día son ~4.300 lecturas (el límite son 5.000.000) y ~50–60 escrituras (el límite son 100.000).
-- **Aún sin medir en producción:** el reparto de avisos reales a suscriptores por la cola y el respaldo semanal (solo probados en local y con un Worker de prueba sin destinatarios). Se verificarán con la primera oferta nueva real.
+- **Aún sin medir en producción:** el reparto de avisos reales a suscriptores por la cola (probado en local y con un Worker de prueba sin destinatarios). Se verificarán con la primera oferta nueva real.
 
 ## Desplegar, rotar secretos y volver atrás
 
@@ -201,7 +201,7 @@ Hasta que `live = 1` en la tabla `meta` el cron no avisa nada (sirve para probar
 **Rotar secretos**
 - **Secreto del webhook:** nuevo valor en `.env` → `node bot/scripts/load-secrets.mjs` → `node epm-notifier.mjs --set-webhook=<url>`.
 - **Token del bot:** `/revoke` en @BotFather → actualiza `.env` → `load-secrets.mjs` → vuelve a registrar el webhook.
-- **`STATE_KEY`:** no se puede cambiar sin migrar: cifra suscriptores, chats y respaldos. Si se pierde, las suscripciones no se pueden descifrar (los usuarios tendrían que volver a suscribirse). Guárdala en un gestor de contraseñas.
+- **`STATE_KEY`:** no se puede cambiar sin migrar: cifra suscriptores y chats (y los respaldos automáticos, si algún día se activan). Si se pierde, las suscripciones no se pueden descifrar (los usuarios tendrían que volver a suscribirse). Guárdala en un gestor de contraseñas.
 
 **Vuelta atrás al sistema anterior** (sigue intacto pero desactivado: Worker `epm-notifier-webhook`, workflow y rama `state`):
 1. `UPDATE meta SET v='0' WHERE k='live'` en D1 (el cron nuevo deja de avisar).
@@ -211,12 +211,27 @@ Hasta que `live = 1` en la tabla `meta` el cron no avisa nada (sirve para probar
 
 ## Pendientes y riesgos
 
-- **D1 es el único almacén del estado.** Mitigaciones: Time Travel (7 días) y el respaldo semanal cifrado, que **todavía no corre porque falta `GH_BACKUP_TOKEN`**.
+- **D1 es el único almacén del estado.** Mitigaciones: Time Travel (7 días) y las copias locales que hagas con `backup-local.mjs` (ver [Respaldos](#respaldos)). **No hay respaldo automático fuera de Cloudflare**: si no haces copias locales, solo cuentas con esos 7 días.
 - **Cuotas diarias.** Si se agotaran (100.000 peticiones/día, 100.000 escrituras o 5.000.000 lecturas de D1), el bot deja de responder hasta las 00:00 UTC; no se cobra nada. El consumo normal es una fracción mínima de esos límites, pero un abuso masivo podría alcanzarlas.
 - **CPU del cron ajustada** (5–8 ms de 10, ver arriba): vigilar el valor tras cambios de código.
 - **Cron de Cloudflare:** puede retrasarse unos minutos; la propagación tras desplegar tarda hasta 15 min.
 - **API de EPM:** no es un contrato público. Si cambia su estructura, el cron falla de forma visible, cuenta los fallos seguidos y avisa al administrador al tercero (~1,5 h). Los campos «Título requerido», «Experiencia requerida» y «Dirigida a» dependen en parte del texto libre de cada oferta (ver abajo).
 - **Sistema anterior:** desactivado, no borrado. Se limpiará (`worker/`, workflow, `epm-notifier.mjs`, `k8s/`) en un cambio aparte, cuando el nuevo lleve un tiempo estable.
+
+## Respaldos
+
+**El respaldo automático semanal a GitHub está desactivado** (`BACKUP_ENABLED = "0"` en [bot/wrangler.toml](bot/wrangler.toml); el código sigue en [backup.js](bot/src/lib/backup.js), inerte). Motivos:
+
+- **El repositorio es público:** los archivos cifrados quedarían en el historial para siempre, también los de semanas pasadas. Aunque van cifrados con AES-GCM, su seguridad pasa a depender solo de `STATE_KEY`, y su tamaño y fechas son visibles (se deduce de forma aproximada cuántos suscriptores hay).
+- **Permiso amplio del token:** escribir en una rama exige un token con *Contents: Read and write* sobre el repositorio. Ese token también podría escribir en `main`; el código solo toca la rama `d1-backup`, pero el límite lo pone el permiso, no el código. Guardarlo en el Worker amplía lo que se puede perder si el Worker o su cuenta se ven comprometidos.
+
+**Qué hay en su lugar:** Time Travel de D1 (7 días, `wrangler d1 time-travel restore`) y una **copia local a demanda**:
+
+```bash
+node bot/scripts/backup-local.mjs          # → bot/backups/d1-AAAA-MM-DD-HHMM.sql (ignorada por git; conserva las últimas 12)
+```
+
+Restaurar y guardar la copia: ver [bot/README.md](bot/README.md#respaldo). Para reactivar el automático, ver la misma sección.
 
 ## Uso del bot: perfiles, suscripciones y comandos
 
@@ -240,12 +255,13 @@ Hasta el 2026-10-26 el bot corría en GitHub Actions (un job por comando, 11–2
 
 - Los secretos solo existen como *secrets* del Worker (`wrangler secret put`) y en un `.env` local ignorado por git. Nunca en el repositorio, ni en `wrangler.toml` (el `database_id` real vive en `wrangler.local.toml`, también ignorado).
 - El Worker rechaza con 401 cualquier petición sin el header secreto correcto (comparación en tiempo constante, antes de leer el cuerpo), limita el tamaño del cuerpo y reduce cada update a lo mínimo.
-- Suscriptores y chats van cifrados en D1; los respaldos, también.
+- Suscriptores y chats van cifrados en D1; las copias locales los contienen cifrados (sin `STATE_KEY` no se pueden leer).
 - Los logs no incluyen tokens, claves, chat ids ni textos de usuarios (comprobado en producción con `wrangler tail`).
 - Si sospechas que el token del bot se filtró, revócalo con @BotFather (`/revoke`), actualiza el secreto y vuelve a registrar el webhook.
 
 ## Historial de cambios
 
+- **2026-10-26 — Respaldo automático desactivado; copia local a demanda.** El respaldo semanal a la rama `d1-backup` queda inerte (`BACKUP_ENABLED = "0"`) por ser un repositorio público y requerir un token con permiso amplio. Nuevo `bot/scripts/backup-local.mjs` (`wrangler d1 export` a una carpeta ignorada por git), con restauración verificada.
 - **2026-10-26 — El bot pasa a un Cloudflare Worker con D1 y cola (100 % gratuito).** Los comandos y botones responden en décimas de segundo (antes 11–25 s) porque ya no pasan por GitHub Actions. El estado vive en D1 (suscriptores y chats cifrados), la revisión de ofertas es un cron ligero que encola el trabajo pesado, y una oferta solo se marca como vista después de encolar su aviso. La tarjeta añade **🎓 Título requerido** y **💼 Experiencia requerida**. Se midió el CPU real en producción (ver [cifras](#cifras-medidas-en-cloudflare)). El sistema anterior queda desactivado, sin borrar, para volver atrás.
 - **2026-10-24 — Disparador de respaldo para la revisión de ofertas nuevas.** Un Cron Trigger del Worker de Cloudflare lanzaba el workflow cada ~30 minutos (`cron_tick`) porque el cron de GitHub no se disparó en las primeras ~2,5 horas. *(Reemplazado el 2026-10-26.)*
 - **2026-10-24 — Ofertas con título clicable, descripción breve, audiencia (servidores EPM / público general), fecha de publicación y fecha límite.** Una sola tarjeta para el botón de ofertas y para el aviso de oferta nueva, con fechas en hora de Bogotá y ofertas cerradas fuera del botón. Se corrigió un error del aviso de oferta nueva, que mostraba la fecha límite un día tarde por usarla en UTC.
