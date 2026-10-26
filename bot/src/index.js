@@ -130,7 +130,7 @@ async function handleWebhook(request, env, ctx) {
 async function handleAdmin(request, env, url) {
   const tok = request.headers.get('x-admin-token') || '';
   if (!env.WEBHOOK_SECRET || !(await sameSecret(tok, env.WEBHOOK_SECRET))) return reply(401);
-  const c = await makeContext(env);
+  const c = await makeContext(env, { needVault: false });
   if (url.pathname === '/admin/status') {
     const n = async (t) => (await c.db.first(`SELECT COUNT(*) AS c FROM ${t}`)).c;
     const [meta, usage, events] = await Promise.all([c.db.getMetas(['live', 'cmds', 'epm_fail', 'last_backup']), c.db.usageRows(3), c.db.recentEvents(10)]);
@@ -157,7 +157,7 @@ export default {
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(
       (async () => {
-        const c = await makeContext(env);
+        const c = await makeContext(env, { needVault: false });
         try {
           await runCron(c);
         } catch (e) {

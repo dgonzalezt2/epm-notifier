@@ -3,9 +3,10 @@ import { makeDb } from './db.js';
 import { makeVault } from './crypto.js';
 import { Budget, makeTg } from './telegram.js';
 
-export async function makeContext(env, { cap = 45 } = {}) {
+// needVault = false: el cron no cifra ni descifra nada, así que se ahorra derivar las claves (CPU del límite de 10 ms).
+export async function makeContext(env, { cap = 45, needVault = true } = {}) {
   const db = makeDb(env);
-  const vault = await makeVault(env.STATE_KEY);
+  const vault = needVault ? await makeVault(env.STATE_KEY) : null;
   const budget = new Budget(cap);
   const tg = makeTg(env, { budget, stats: db.stats });
   const c = {
