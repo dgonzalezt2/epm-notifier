@@ -1,0 +1,41 @@
+# Worker del bot EPM -> Telegram (plan gratuito de Cloudflare). Ver bot/README.md.
+#
+# database_id: es un identificador, no una credencial (sin un token de tu cuenta no sirve para nada), pero se mantiene fuera
+# del repositorio. Copia este archivo a wrangler.local.toml (ignorado por git), pon tu id y despliega con:
+#   npx wrangler deploy -c wrangler.local.toml
+name = "epm-bot"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+# Valores NO secretos. Secretos (wrangler secret put): TELEGRAM_BOT_TOKEN, WEBHOOK_SECRET, STATE_KEY, TELEGRAM_CHAT_ID, GH_BACKUP_TOKEN (opcional).
+[vars]
+BOT_USERNAME = "epmofertasbot"
+TELEGRAM_API = "https://api.telegram.org"
+GITHUB_API = "https://api.github.com"
+GITHUB_REPO = "dgonzalezt2/epm-notifier"
+MAX_SUBS = "500"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "epm-bot-db"
+database_id = "REEMPLAZA-CON-EL-ID-DE-TU-BASE-D1"
+migrations_dir = "migrations"
+
+# Cola: trabajo pesado y reparto de avisos. Un mensaje por invocación (50 subpeticiones cada una).
+[[queues.producers]]
+binding = "JOBS"
+queue = "epm-bot-jobs"
+
+[[queues.consumers]]
+queue = "epm-bot-jobs"
+max_batch_size = 1
+max_retries = 3
+
+# Un solo Cron Trigger (la cuenta gratuita permite 5). Hasta el corte, `live = 0` en D1 hace que no avise nada.
+[triggers]
+crons = ["*/30 * * * *"]
+
+# Sin logs de peticiones: el Worker no registra tokens ni contenido de mensajes.
+[observability]
+enabled = false

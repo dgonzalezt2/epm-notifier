@@ -7,3 +7,7 @@ state-data/
 worker/node_modules/
 worker/.wrangler/
 worker/.dev.vars
+bot/wrangler.local.toml
+bot/.wrangler/
+bot/.dev.vars
+bot/node_modules/

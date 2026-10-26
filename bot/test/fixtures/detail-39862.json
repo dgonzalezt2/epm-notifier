@@ -1,0 +1,139 @@
+{
+  "items" : [ {
+    "Id" : "39862",
+    "Title" : "TECNÓLOGO-TECNÓLOGA OPERACIÓN MANTENIMIENTO Y SERVICIOS",
+    "Category" : "Tecnólogos, Técnicos y Auxiliares",
+    "RequisitionType" : "Campus",
+    "JobGrade" : null,
+    "RequisitionId" : 300000884967419,
+    "ExternalPostedStartDate" : "2026-10-22T18:43:59+00:00",
+    "JobLevel" : null,
+    "JobSchedule" : null,
+    "JobShift" : null,
+    "StudyLevel" : null,
+    "InternationalTravelRequired" : null,
+    "ExternalContactName" : null,
+    "ExternalContactEmail" : null,
+    "ContractType" : null,
+    "ExternalPostedEndDate" : "2026-10-28T04:59:00+00:00",
+    "JobFamilyId" : 300000028756363,
+    "GeographyId" : 300000028488789,
+    "GeographyNodeId" : 100000198255050,
+    "ExternalDescriptionStr" : "<p><span><strong>- Público Objetivo:&nbsp;</strong></span></p>\n<p><span>-Servidores/as de EPM (abierta a todas las dependencias);</span></p>\n<p><span>-Servidores/as que ocupen cargos de facilitador/ra de soluciones;&nbsp;</span></p>\n<p><span>-Servidores/as o exservidores de EPM del programa de inclusión laboral.</span><br><br><br><span><strong>- Licencias requeridas:&nbsp;</strong></span><br><span>&nbsp;</span><br><span>- El desempeño de las funciones requiere tener licencia de conducción de moto vigente, registrada en el RUNT, con categoría A2.&nbsp;</span></p>\n<p><span>-</span><span>Este cargo requiera conducir vehículo (carro o moto), al momento de la inscripción el candidato <i>no puede registrar multas pendientes por pago</i> y hasta el momento de la vinculación. ni tener sanción que pese sobre la licencia de conducción (artículo 124 ley 769), información que se verificará en las entidades gubernamentales correspondientes; si el candidato presenta una o ambas condiciones no podrá continuar en este proceso de selección.</span><br><br><span><strong>- Certificaciones requeridas:&nbsp;</strong></span><br><br><span>- Se requiere valorar la aptitud psicofísica para desempeñar actividades de trabajo en alturas</span><br><br><span><strong>- Matrículas requeridas:&nbsp;</strong></span><br><br><span>- Tarjeta y/o Matrícula Profesional&nbsp;</span></p>\n<p><br><span><strong>- Conocimientos requeridos:&nbsp;</strong></span></p>\n<ul>\n <li>Sistemas de información geográfica: geodesia e ingeniería catastral: Plataforma ESRI (ArcGis) y Plataforma Intergraph-</li>\n <li>&nbsp;Sistemas de información geográfica</li>\n <li>Operación e interpretación de resultados de sistema de información geográfica - SIG</li>\n <li>Gestión social, ambiental y Seguridad y Salud en el Trabajo</li>\n</ul>\n<p><strong>-Observaciones generales:</strong></p>\n<p>-El cargo podrá requerir desplazamiento a territorios donde EPM tiene presencia y trabajar por fuera de la jornada laboral cuando la prestación del servicio lo requiera.</p>\n<p>&nbsp;</p>",
+    "CorporateDescriptionStr" : "",
+    "OrganizationDescriptionStr" : "",
+    "ShortDescriptionStr" : "Función Básica: Realizar actividades técnicas, operativas y administrativas requerida en los procesos de expansión, reposición, operación y mantenimiento de la infraestructura asociada a la prestación de los servicios públicos domiciliarios y gestionar los daños que se presenten, de acuerdo con los procedimientos establecidos y el marco regulatorio y normativo, con el fin de garantizar la continuidad de los servicios públicos de manera segura, confiable y económica",
+    "ContentLocale" : "es",
+    "PrimaryLocation" : "Medellín, Antioquia, Colombia",
+    "PrimaryLocationCountry" : "CO",
+    "ObjectVerNumberProfile" : null,
+    "ApplyWhenNotPostedFlag" : false,
+    "ExternalQualificationsStr" : "",
+    "InternalQualificationsStr" : "",
+    "InternalResponsibilitiesStr" : "<p><span style=\"font-family:'arial';font-size:small\"><strong>Funciones Principales: </strong></span><br /><br /><br /><span style=\"font-family:'arial';font-size:small\"><strong>Operación y Mantenimiento </strong></span><br /><br /><span style=\"font-family:'arial';font-size:small\">- Programar, asignar y ejecutar las actividades y planes de mantenimiento predictivo, preventivo y correctivo, montaje, instalación y puesta en marcha de equipos, estructuras, estaciones hidrometeorológicas, instalaciones o redes de los sistemas conforme a instrucciones, procedimientos y normas establecidas. </span><br /><span style=\"font-family:'arial';font-size:small\">- Suministrar información para la elaboración de los diagnósticos para la optimización y reposición de los sistemas. </span><br /><span style=\"font-family:'arial';font-size:small\">- Revisar el desarrollo de las tareas en campo cuando se requiera y brindar el soporte técnico requerido por el personal operativo.  </span><br /><span style=\"font-family:'arial';font-size:small\">- Ejecutar maniobras operativas en los sistemas, cuando se requiera. </span><br /><span style=\"font-family:'arial';font-size:small\">- Atender los requerimientos asignados para la corrección de anomalías en los sistemas. </span><br /><span style=\"font-family:'arial';font-size:small\">- Realizar las actividades en campo derivadas de la asistencia técnica a los proyectos de terceros que puedan impactar el sistema. </span><br /><span style=\"font-family:'arial';font-size:small\">- Recolectar, evaluar, almacenar y procesar la información de la instrumentación geotécnica, sísmica y estructural instalada en presas, taludes y obras hidráulicas. </span><br /><span style=\"font-family:'arial';font-size:small\">- Realizar levantamientos topográficos y sondeo batimétrico de embalses. </span><br /><span style=\"font-family:'arial';font-size:small\">- Inspeccionar y verificar el correcto funcionamiento de los equipos entregados para su respectivo montaje </span><br /><br /><span style=\"font-family:'arial';font-size:small\"><strong>Administración de Contratos </strong></span><br /><br /><span style=\"font-family:'arial';font-size:small\">- Realizar los trámites asignados para la entrega parcial o total del bien/servicio contratado. </span><br /><span style=\"font-family:'arial';font-size:small\">- Realizar las inspecciones en el terreno con el fin de verificar el avance en la ejecución del contrato de acuerdo con las condiciones técnicas pactadas, recomendar los ajustes y hacer seguimiento a su aplicación. </span><br /><span style=\"font-family:'arial';font-size:small\">- Revisar la ejecución de las acciones de prevención y mitigación de impactos comunitarios en los medios físico, biótico y social, ocasionados por el desarrollo de contratos, recomendar los ajustes y hacer seguimiento a su aplicación. </span><br /><span style=\"font-family:'arial';font-size:small\">- Verificar el desarrollo del sistema de gestión de seguridad y salud en el trabajo a cargo del contratista en los contratos que le sean asignados, solicitar los ajustes y hacer seguimiento a su aplicación. </span><br /><span style=\"font-family:'arial';font-size:small\">- Revisar el cumplimiento de los aspectos ambientales acordados en el Plan de Manejo Ambiental, proponer los ajustes y hacer seguimiento a su aplicación. </span><br /><span style=\"font-family:'arial';font-size:small\">- Liquidar el avance de ejecución del contrato, de acuerdo con la periodicidad definida. </span><br /><span style=\"font-family:'arial';font-size:small\">- Diligenciar los documentos que soportan el pago del bien/servicio recibido y tramitar la autorización del pago. </span><br /><span style=\"font-family:'arial';font-size:small\">- Gestionar los pedidos y entrega de materiales y equipos propiedad de EPM. al contratista y recibirlos cuando finalice el contrato. </span><br /><span style=\"font-family:'arial';font-size:small\">- Asistir a las reuniones de seguimiento con el contratista con el fin de evaluar el avance del contrato. </span><br /><span style=\"font-family:'arial';font-size:small\">- Llevar los registros de información, fotográficos o de video que soporte el seguimiento a la ejecución del contrato. </span><br /><span style=\"font-family:'arial';font-size:small\">- Consolidar y revisar la consistencia de la información del personal requerido en los contratos. </span><br /><span style=\"font-family:'arial';font-size:small\">- Elaborar los informes de seguimiento al desarrollo del contrato y reportar las novedades detectadas. </span><br /><span style=\"font-family:'arial';font-size:small\">- Revisar la información de la ejecución del contrato registrada en el aplicativo definido. </span><br /><br /><span style=\"font-family:'arial';font-size:small\"><strong>Gestión Ambiental-Gestión Social </strong></span><br /><br /><span style=\"font-family:'arial';font-size:small\">- Verificar y ejecutar las actividades y obras definidas para prever, mitigar, compensar o corregir los impactos ambientales y sociales generados por las actividades de EPM. </span><br /><span style=\"font-family:'arial';font-size:small\">- Verificar y ejecutar las obras o acciones de participación en el desarrollo comunitario que le sean encomendadas. </span><br /><span style=\"font-family:'arial';font-size:small\">- Evaluar y ejecutar las acciones que le correspondan dentro del plan interno de emergencia (PIDE) para detectar, prevenir y alertar sobre riesgos en las presas y demás estructuras bajo su control. </span><br /><span style=\"font-family:'arial';font-size:small\">- Orientar e informar a las entidades y personas internas y externas en temas asociados con el mantenimiento y construcción de obras para mitigar los impactos y facilitar el desarrollo de las mismas. </span><br /><span style=\"font-family:'arial';font-size:small\">- Evaluar y ejecutar las actividades forestales, administración de embalses y conservación de recursos naturales, control de erosión y de seguridad de presas que le sean encomendadas. </span><br /><br /><br /><span style=\"font-family:'arial';font-size:small\"><strong>Sistema de gestión de activos </strong></span><br /><br /><span style=\"font-family:'arial';font-size:small\">- Identificar tendencias de la condición y operación de los activos, fallas repetitivas, problemas de eficiencia, problemas de seguridad y oportunidades de mejora para la gestión de activos.</span><br /> </p><p><span style=\"font-family:'arial';font-size:small\"><strong>TRANSVERSAL </strong></span><br /><br /><span style=\"font-family:'arial';font-size:small\">- Controlar, soportar, documentar, conciliar, revelar, clasificar y medir adecuadamente el registro de todos los hechos económicos que le sean asignados, con el fin de contribuir a la calidad de la información en los estados financieros y suministrar oportunamente la información que le sea requerida para efectos contables o financieros. </span></p><p> </p><p><br /> </p><p><span style=\"font-family:'arial';font-size:small\"> </span></p><p> </p>",
+    "ExternalResponsibilitiesStr" : "<p><span style=\"font-family:'arial';font-size:small\"><strong>Funciones Principales: </strong></span><br /><br /><br /><span style=\"font-family:'arial';font-size:small\"><strong>Operación y Mantenimiento </strong></span><br /><br /><span style=\"font-family:'arial';font-size:small\">- Programar, asignar y ejecutar las actividades y planes de mantenimiento predictivo, preventivo y correctivo, montaje, instalación y puesta en marcha de equipos, estructuras, estaciones hidrometeorológicas, instalaciones o redes de los sistemas conforme a instrucciones, procedimientos y normas establecidas. </span><br /><span style=\"font-family:'arial';font-size:small\">- Suministrar información para la elaboración de los diagnósticos para la optimización y reposición de los sistemas. </span><br /><span style=\"font-family:'arial';font-size:small\">- Revisar el desarrollo de las tareas en campo cuando se requiera y brindar el soporte técnico requerido por el personal operativo.  </span><br /><span style=\"font-family:'arial';font-size:small\">- Ejecutar maniobras operativas en los sistemas, cuando se requiera. </span><br /><span style=\"font-family:'arial';font-size:small\">- Atender los requerimientos asignados para la corrección de anomalías en los sistemas. </span><br /><span style=\"font-family:'arial';font-size:small\">- Realizar las actividades en campo derivadas de la asistencia técnica a los proyectos de terceros que puedan impactar el sistema. </span><br /><span style=\"font-family:'arial';font-size:small\">- Recolectar, evaluar, almacenar y procesar la información de la instrumentación geotécnica, sísmica y estructural instalada en presas, taludes y obras hidráulicas. </span><br /><span style=\"font-family:'arial';font-size:small\">- Realizar levantamientos topográficos y sondeo batimétrico de embalses. </span><br /><span style=\"font-family:'arial';font-size:small\">- Inspeccionar y verificar el correcto funcionamiento de los equipos entregados para su respectivo montaje </span><br /><br /><span style=\"font-family:'arial';font-size:small\"><strong>Administración de Contratos </strong></span><br /><br /><span style=\"font-family:'arial';font-size:small\">- Realizar los trámites asignados para la entrega parcial o total del bien/servicio contratado. </span><br /><span style=\"font-family:'arial';font-size:small\">- Realizar las inspecciones en el terreno con el fin de verificar el avance en la ejecución del contrato de acuerdo con las condiciones técnicas pactadas, recomendar los ajustes y hacer seguimiento a su aplicación. </span><br /><span style=\"font-family:'arial';font-size:small\">- Revisar la ejecución de las acciones de prevención y mitigación de impactos comunitarios en los medios físico, biótico y social, ocasionados por el desarrollo de contratos, recomendar los ajustes y hacer seguimiento a su aplicación. </span><br /><span style=\"font-family:'arial';font-size:small\">- Verificar el desarrollo del sistema de gestión de seguridad y salud en el trabajo a cargo del contratista en los contratos que le sean asignados, solicitar los ajustes y hacer seguimiento a su aplicación. </span><br /><span style=\"font-family:'arial';font-size:small\">- Revisar el cumplimiento de los aspectos ambientales acordados en el Plan de Manejo Ambiental, proponer los ajustes y hacer seguimiento a su aplicación. </span><br /><span style=\"font-family:'arial';font-size:small\">- Liquidar el avance de ejecución del contrato, de acuerdo con la periodicidad definida. </span><br /><span style=\"font-family:'arial';font-size:small\">- Diligenciar los documentos que soportan el pago del bien/servicio recibido y tramitar la autorización del pago. </span><br /><span style=\"font-family:'arial';font-size:small\">- Gestionar los pedidos y entrega de materiales y equipos propiedad de EPM. al contratista y recibirlos cuando finalice el contrato. </span><br /><span style=\"font-family:'arial';font-size:small\">- Asistir a las reuniones de seguimiento con el contratista con el fin de evaluar el avance del contrato. </span><br /><span style=\"font-family:'arial';font-size:small\">- Llevar los registros de información, fotográficos o de video que soporte el seguimiento a la ejecución del contrato. </span><br /><span style=\"font-family:'arial';font-size:small\">- Consolidar y revisar la consistencia de la información del personal requerido en los contratos. </span><br /><span style=\"font-family:'arial';font-size:small\">- Elaborar los informes de seguimiento al desarrollo del contrato y reportar las novedades detectadas. </span><br /><span style=\"font-family:'arial';font-size:small\">- Revisar la información de la ejecución del contrato registrada en el aplicativo definido. </span><br /><br /><span style=\"font-family:'arial';font-size:small\"><strong>Gestión Ambiental-Gestión Social </strong></span><br /><br /><span style=\"font-family:'arial';font-size:small\">- Verificar y ejecutar las actividades y obras definidas para prever, mitigar, compensar o corregir los impactos ambientales y sociales generados por las actividades de EPM. </span><br /><span style=\"font-family:'arial';font-size:small\">- Verificar y ejecutar las obras o acciones de participación en el desarrollo comunitario que le sean encomendadas. </span><br /><span style=\"font-family:'arial';font-size:small\">- Evaluar y ejecutar las acciones que le correspondan dentro del plan interno de emergencia (PIDE) para detectar, prevenir y alertar sobre riesgos en las presas y demás estructuras bajo su control. </span><br /><span style=\"font-family:'arial';font-size:small\">- Orientar e informar a las entidades y personas internas y externas en temas asociados con el mantenimiento y construcción de obras para mitigar los impactos y facilitar el desarrollo de las mismas. </span><br /><span style=\"font-family:'arial';font-size:small\">- Evaluar y ejecutar las actividades forestales, administración de embalses y conservación de recursos naturales, control de erosión y de seguridad de presas que le sean encomendadas. </span><br /><br /><br /><span style=\"font-family:'arial';font-size:small\"><strong>Sistema de gestión de activos </strong></span><br /><br /><span style=\"font-family:'arial';font-size:small\">- Identificar tendencias de la condición y operación de los activos, fallas repetitivas, problemas de eficiencia, problemas de seguridad y oportunidades de mejora para la gestión de activos.</span><br /> </p><p><span style=\"font-family:'arial';font-size:small\"><strong>TRANSVERSAL </strong></span><br /><br /><span style=\"font-family:'arial';font-size:small\">- Controlar, soportar, documentar, conciliar, revelar, clasificar y medir adecuadamente el registro de todos los hechos económicos que le sean asignados, con el fin de contribuir a la calidad de la información en los estados financieros y suministrar oportunamente la información que le sea requerida para efectos contables o financieros. </span></p><p> </p><p><br /> </p><p><span style=\"font-family:'arial';font-size:small\"> </span></p><p> </p>",
+    "JobFunctionCode" : null,
+    "HotJobFlag" : false,
+    "TrendingFlag" : false,
+    "BeFirstToApplyFlag" : false,
+    "WorkplaceTypeCode" : null,
+    "WorkplaceType" : "",
+    "OtherRequisitionTitle" : null,
+    "NumberOfOpenings" : null,
+    "HiringManager" : null,
+    "Organization" : null,
+    "BusinessUnitId" : 300000028474833,
+    "LegalEmployerId" : 300000000734188,
+    "OrganizationId" : 300000797865321,
+    "WorkerType" : null,
+    "JobType" : null,
+    "WorkMonths" : null,
+    "WorkYears" : null,
+    "WorkHours" : null,
+    "WorkDays" : null,
+    "LegalEmployer" : null,
+    "BusinessUnit" : null,
+    "Department" : null,
+    "DomesticTravelRequired" : null,
+    "JobFunction" : null,
+    "secondaryLocations" : [ ],
+    "media" : [ ],
+    "workLocation" : [ {
+      "LocationId" : 300000676047251,
+      "LocationName" : "DESPACHO ACUEDUCTO Y ALCANTARILLADO BELÉN",
+      "AddressLine1" : "Carrera 66B  # 32-112",
+      "AddressLine2" : null,
+      "AddressLine3" : null,
+      "AddressLine4" : null,
+      "Building" : null,
+      "TownOrCity" : "Medellín",
+      "PostalCode" : null,
+      "Country" : "CO",
+      "Region1" : null,
+      "Region2" : "Antioquia",
+      "Region3" : null,
+      "Longitude" : "-74.67867",
+      "Latitude" : "6.25031"
+    } ],
+    "otherWorkLocations" : [ ],
+    "requisitionFlexFields" : [ {
+      "Prompt" : "Departamento (Dependencia)",
+      "Value" : "ÁREA GESTIÓN DE INFORMACIÓN ACUEDUCTO Y ALCANTARILLADO",
+      "ControlType" : "TextArea",
+      "SequenceNumber" : 2
+    }, {
+      "Prompt" : "Tipo de contrato",
+      "Value" : "Término indefinido",
+      "ControlType" : "SingleChoiceList",
+      "SequenceNumber" : 5
+    }, {
+      "Prompt" : "Salario",
+      "Value" : "6,452,517.87",
+      "ControlType" : "TextArea",
+      "SequenceNumber" : 6
+    }, {
+      "Prompt" : "Jornada laboral",
+      "Value" : "Tiempo completo",
+      "ControlType" : "SingleChoiceList",
+      "SequenceNumber" : 7
+    }, {
+      "Prompt" : "Título requerido",
+      "Value" : "Título de pregrado tecnológico en campos amplio Ingeniería, Industria y Construcción; Administración de Empresas y Derecho.\n\nSegún la Clasificación Internacional Normalizada de la Educación adaptada para Colombia (CINE-F 2013 A.C).",
+      "ControlType" : "TextArea",
+      "SequenceNumber" : 11
+    }, {
+      "Prompt" : "Título posgrado requerido",
+      "Value" : "N/A",
+      "ControlType" : "TextArea",
+      "SequenceNumber" : 15
+    }, {
+      "Prompt" : "Experiencia requerida",
+      "Value" : "Cuatro (4) años de experiencia laboral en supervisión técnica en contratos de Referenciación y localización espacial de los elementos de Acueducto y Alcantarillado.",
+      "ControlType" : "TextArea",
+      "SequenceNumber" : 17
+    }, {
+      "Prompt" : "Experiencia / Ley 2043, Ley 2039 de 2020 y Decreto 952 de 2021",
+      "Value" : "Se reconoce como experiencia profesional y/o relacionada aquellas prácticas que se hayan realizado en el sector público y/o sector privado como opción para adquirir el correspondiente título, en cumplimiento de la Ley 2043 de 2020. Para los jóvenes entre 14 y 28 años de edad, como experiencia laboral previa se incluye la obtenida en: prácticas laborales, contratos de aprendizaje, judicatura, relación docencia de servicio del sector salud, servicio social obligatorio o voluntariados en los términos señalados en la referenciada normativa y la que sea expedida por el Departamento Administrativo de la Función Pública, en cumplimiento de la Ley 2039 de 2020 y en el Decreto 952 de 2021.",
+      "ControlType" : "TextArea",
+      "SequenceNumber" : 18
+    } ],
+    "primaryLocationCoordinates" : [ {
+      "GeographyNodeId" : 100000198255050,
+      "GeographyId" : 300000028488789,
+      "Latitude" : "6.24589",
+      "Longitude" : "-75.57457",
+      "CountryCode" : "CO"
+    } ],
+    "skills" : [ ]
+  } ],
+  "count" : 1,
+  "hasMore" : false,
+  "limit" : 499,
+  "offset" : 0,
+  "links" : [ {
+    "rel" : "self",
+    "href" : "https://hbcp.fa.us2.oraclecloud.com:443/hcmRestApi/resources/11.13.18.05/recruitingCEJobRequisitionDetails",
+    "name" : "recruitingCEJobRequisitionDetails",
+    "kind" : "collection"
+  } ]
+}

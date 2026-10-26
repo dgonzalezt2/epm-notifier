@@ -1,0 +1,109 @@
+# Bot EPM → Telegram en un Cloudflare Worker (100 % gratuito)
+
+Telegram → **Cloudflare Worker + D1** (+ una cola). Sin GitHub Actions en el camino de cada pulsación: responde en décimas de segundo.
+Todo funciona en el plan **gratuito** de Cloudflare, sin tarjeta.
+
+```
+Telegram ──POST──▶ fetch()      valida el secreto, procesa la update en D1 y responde (~0,1–0,6 s)
+Cron */30  ──────▶ scheduled()  consulta EPM, compara con D1 y encola lo nuevo
+Cola       ──────▶ queue()      detalle de la oferta, tarjeta y reparto de avisos (CPU holgada, ≤35 envíos por mensaje)
+```
+
+> Estado: **desplegado y probado, pero sin activar**. Mientras `live = 0` en D1 el cron no avisa nada y el webhook de Telegram sigue
+> apuntando al sistema anterior (`worker/` + GitHub Actions). Ver [Corte](#corte-activar-el-sistema-nuevo) y [Vuelta atrás](#vuelta-atrás).
+
+## Límites del plan gratuito (documentación de Cloudflare) y medidas reales
+
+| Recurso | Límite gratuito | Dónde se nota |
+|---|---|---|
+| Peticiones al Worker | 100.000 / día | Cada update de Telegram. Se valida el secreto lo primero y se limita por chat (8 cada 10 s). |
+| CPU por invocación (HTTP y Cron) | 10 ms | El cron solo compara y encola; el trabajo pesado va a la cola. |
+| Subpeticiones `fetch` por invocación | 50 (comprobado: la 51.ª falla) | Un mensaje de la cola envía ≤35 avisos; el reparto va en varios mensajes. |
+| D1: lecturas / escrituras | 5.000.000 / **100.000** por día | Al excederlas las consultas fallan hasta las 00:00 UTC (no se cobra). |
+| D1: almacenamiento | 5 GB (500 MB por base) | Se usan unos KB. |
+| D1: Time Travel | 7 días, siempre activo | Segunda capa de respaldo. |
+| Cola (Queues) | 10.000 operaciones / día | ~3 operaciones por mensaje: un aviso a 500 suscriptores ≈ 40. |
+| Cron Triggers | 5 por cuenta (se usa 1) | Tarda hasta 15 min en propagarse tras desplegar. |
+
+Medido en Cloudflare con un Worker de prueba (después borrado): EPM responde desde su red (0 bloqueos en 4 pruebas); D1 ~25 ms por lectura y ~42 ms por escritura;
+25 incrementos simultáneos dieron exactamente +25; el consumidor de la cola admitió 124 ms de CPU (HTTP y Cron: 10 ms); PBKDF2 con 200.000 iteraciones **no cabe** en 10 ms
+(por eso el cifrado usa HKDF); 12 ofertas procesadas de golpe cuestan 4–13 ms de CPU en frío (por eso el procesamiento va a la cola).
+
+### Consumo de D1 por operación (medido)
+| Operación | Filas leídas | Filas escritas |
+|---|---|---|
+| Menú, botones de menú | 0 | 0 |
+| `/ofertas` (12 ofertas desde D1) | 12 | 0 |
+| Suscribirse (alta) | ~3 + recuento de suscriptores | 3 |
+| Cambiar de perfil | 3 | 2 |
+| Repetir la misma elección | 1 | **0** |
+| Cron sin novedades (48 al día) | 57 | 1 |
+
+Con 500 suscriptores, 2.000 updates y 5 ofertas al día: ≈ 130 k lecturas (2,6 %) y ≈ 6 k escrituras (6 %). El tope realista es el de 100.000 peticiones bajo abuso.
+`/uso` (solo administrador) muestra el consumo del día; `GET /admin/status` (con el secreto) devuelve recuentos.
+
+## Esquema de D1 (`migrations/0001_init.sql`)
+`meta` (live…) · `seen` (ofertas vistas) · `offers` (datos públicos de cada oferta) · `subs` y `chats` (**cifrados**, clave de fila = HMAC del chat) ·
+`sent` (un aviso por oferta y destinatario) · `applied` (dedupe de updates) · `usage` y `events` (consumo y errores, sin datos de usuarios).
+
+**Cifrado:** AES-GCM con claves derivadas de `STATE_KEY` por HKDF; el texto cifrado va atado a su fila (no se puede copiar de una fila a otra) y la clave de fila es un HMAC,
+así que ni el chat id ni los perfiles elegidos están en claro en D1. Los cambios usan control de versión (compare-and-swap) con reintentos, y las elecciones son absolutas
+(«activar X»/«quitar X»), por lo que repetir una pulsación no hace daño.
+
+## Secretos (`wrangler secret put`) — nunca en el repositorio
+| Secreto | Para qué |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | Enviar mensajes |
+| `WEBHOOK_SECRET` | Valida `X-Telegram-Bot-Api-Secret-Token` (y las rutas `/admin/*`) |
+| `STATE_KEY` | Cifrado del estado y de los respaldos |
+| `TELEGRAM_CHAT_ID` | Administrador (el primero de la lista) |
+| `GH_BACKUP_TOKEN` | Opcional: token fine-grained con *Contents: Read and write* sobre este repo, para el respaldo semanal |
+
+`node bot/scripts/load-secrets.mjs` los carga desde tu `.env` sin imprimirlos.
+
+## Desplegar
+```bash
+cd bot && npm install
+npx wrangler d1 create epm-bot-db          # copia el id a wrangler.local.toml (copia de wrangler.toml; ignorado por git)
+npx wrangler queues create epm-bot-jobs
+npx wrangler d1 migrations apply epm-bot-db -c wrangler.local.toml --remote
+node scripts/migrate-state.mjs --out /tmp/migrate.sql          # lee la rama `state` (solo lectura) y la API de EPM
+npx wrangler d1 execute epm-bot-db -c wrangler.local.toml --remote --file /tmp/migrate.sql
+npx wrangler deploy -c wrangler.local.toml
+node scripts/load-secrets.mjs
+```
+El `database_id` es un identificador (sin un token de tu cuenta no sirve para nada), pero se mantiene fuera del repositorio.
+
+## Corte: activar el sistema nuevo
+Pruebas previas (todas con el secreto, sin tocar nada): `POST /admin/tick?dry=1` (ve qué haría el cron) y una petición firmada de `/start` al Worker nuevo.
+
+1. **Desactivar los disparadores viejos** para que haya un solo sistema que avise: quitar `schedule` y `repository_dispatch` de `.github/workflows/epm-notifier.yml` y el bloque
+   `[triggers]` de `worker/wrangler.toml` (después `npx wrangler deploy` en `worker/`). Esperar a que termine cualquier ejecución en curso.
+2. **Resincronizar las ofertas vistas** (por si el sistema viejo avisó algo desde la migración):
+   `node bot/scripts/migrate-state.mjs --seen-only --out /tmp/seen.sql && npx wrangler d1 execute epm-bot-db -c wrangler.local.toml --remote --file /tmp/seen.sql`
+3. **Activar:** `npx wrangler d1 execute epm-bot-db -c wrangler.local.toml --remote --command "UPDATE meta SET v='1' WHERE k='live'"`
+4. **Apuntar el webhook:** `node epm-notifier.mjs --set-webhook=https://epm-bot.<subdominio>.workers.dev` (usa `TELEGRAM_WEBHOOK_SECRET` del entorno; `drop_pending_updates=false`).
+5. Comprobar: `/start`, un botón, `node epm-notifier.mjs --webhook-info` (activo, 0 pendientes) y `GET /admin/status`.
+
+## Vuelta atrás
+1. `UPDATE meta SET v='0' WHERE k='live'` (el cron nuevo deja de avisar).
+2. Apuntar el webhook de nuevo al Worker viejo: `node epm-notifier.mjs --set-webhook=https://epm-notifier-webhook.<subdominio>.workers.dev`.
+3. Copiar a `state` lo que el sistema nuevo ya avisó, para que el viejo no lo repita:
+   `npx wrangler d1 execute epm-bot-db -c wrangler.local.toml --remote --json --command "SELECT id FROM seen" > ids.json && node bot/scripts/rollback-seen.mjs --ids ids.json --push`
+4. Restaurar los disparadores viejos (`schedule`, `repository_dispatch` y el `[triggers]` del Worker viejo) y desplegar.
+
+La rama `state` no se toca en ningún otro momento: queda como respaldo del estado anterior.
+
+## Respaldo
+Cada domingo (~03:00 UTC) el cron encola un respaldo: toda D1 en un archivo **cifrado** (AES-GCM) subido a la rama `d1-backup` con la API de contenidos de GitHub
+(se conservan los últimos 8). Sin `GH_BACKUP_TOKEN` se omite y quedan los 7 días de Time Travel (`wrangler d1 time-travel restore`). Forzarlo: `POST /admin/tick?backup=1`.
+
+## Pruebas
+```bash
+cd bot
+npm test                    # unitarias: cifrado, fechas en Bogotá, audiencia, requisitos, tarjeta, aviso nuevo, saneado y límite
+npm run test:migration      # migración del formato antiguo (OpenSSL) a D1 y vuelta atrás
+npm run test:integration    # Worker real (wrangler dev: D1 y cola locales) con Telegram, EPM y GitHub simulados
+```
+Las de integración cubren: 401/405/413/400, tipos descartados, límite por chat, respuesta inmediata, caché vacía, cron en vivo y cola, avisos sin duplicados, 8 pulsaciones simultáneas,
+cron + pulsaciones a la vez, reparto a 83 destinatarios, bloqueos (403) y 429, EPM caído, detalle que falla, ofertas ya cerradas, límites de D1 simulados, respaldo cifrado y ausencia de datos sensibles en logs.

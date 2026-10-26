@@ -1,0 +1,16 @@
+{
+  "name": "epm-bot",
+  "private": true,
+  "version": "2.0.0",
+  "description": "Bot EPM -> Telegram en un Cloudflare Worker con D1 (plan gratuito)",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/unit/*.test.mjs",
+    "test:migration": "node --test test/migration/migration.test.mjs",
+    "test:integration": "node test/integration/run.mjs",
+    "dev": "wrangler dev --local"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

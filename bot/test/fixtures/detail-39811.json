@@ -1,0 +1,139 @@
+{
+  "items" : [ {
+    "Id" : "39811",
+    "Title" : "TECNÓLOGO-TECNÓLOGA PROGRAMA INCLUSIÓN LABORAL",
+    "Category" : "Tecnólogos, Técnicos y Auxiliares",
+    "RequisitionType" : "Campus",
+    "JobGrade" : null,
+    "RequisitionId" : 300000881522182,
+    "ExternalPostedStartDate" : "2026-10-21T12:13:07+00:00",
+    "JobLevel" : null,
+    "JobSchedule" : null,
+    "JobShift" : null,
+    "StudyLevel" : null,
+    "InternationalTravelRequired" : null,
+    "ExternalContactName" : null,
+    "ExternalContactEmail" : null,
+    "ContractType" : null,
+    "ExternalPostedEndDate" : "2026-10-29T04:59:00+00:00",
+    "JobFamilyId" : 300000028756363,
+    "GeographyId" : 300000028488789,
+    "GeographyNodeId" : 100000198255050,
+    "ExternalDescriptionStr" : "<p><span><b>- Público Objetivo:&nbsp;</b></span><span>Este proceso es dirigido a:</span></p>\n<ul>\n <li><span>Personas con discapacidad.</span></li>\n <li><span>Servidores de EPM del Programa de Inclusión Laboral, con una permanencia en el cargo actual mínimo de seis (6) meses en el último año, previo a la fecha de publicación &nbsp; de la oferta de empleo</span></li>\n <li><span>Exservidores/as de EPM que estuvieron vinculados al Programa de Inclusión Laboral mínimo por 1 año, cuya desvinculación sea menor o igual a dos (2) años, previo a la fecha de publicación de la oferta de empleo.</span></li>\n <li><span>Servidores/as que ocupen cargos de facilitador/facilitadora de soluciones.</span></li>\n</ul>\n<p><span><b>**Si no perteneces a este público objetivo, te invitamos a revisar otras convocatorias en las cuales cumplas con todos los requisitos.</b></span><br><br><span><b>- Licencias requeridas:&nbsp;</b></span><br>\n  N/A<br><br><span><b>- Certificaciones requeridas:&nbsp;</b></span></p>\n<p><span>-Certificado de discapacidad expedido por una IPS autorizada, conforme a la Resolución 1197 de 2024. &nbsp;o</span></p>\n<p><span>-Constancia de que el certificado de discapacidad se encuentra en trámite, (emitida por la Secretaría de Salud Municipal o Distrital o por la IPS autorizada) y dictamen de pérdida de capacidad laboral expedido por la ARL, EPS, fondo de pensiones, Junta Regional o Nacional de Calificación de Invalidez o Junta Médico Laboral.</span><br><br><br><span><b>- Matrículas requeridas:&nbsp;</b></span><br><br><span>- Tarjeta y/o Matrícula Profesional&nbsp;</span><br><br><br><span><b>- Conocimientos requeridos:&nbsp;</b></span><br><br>\n  • Herramientas informáticas básicas<br>\n  • Manejo de bases de datos</p>",
+    "CorporateDescriptionStr" : "",
+    "OrganizationDescriptionStr" : "",
+    "ShortDescriptionStr" : "Función Básica: Desarrollar las actividades de nivel Tecnológico que se establezcan en el plan de trabajo que le sea asignado en el marco del Programa de Inclusión Laboral de Personas con Discapacidad.",
+    "ContentLocale" : "es",
+    "PrimaryLocation" : "Medellín, Antioquia, Colombia",
+    "PrimaryLocationCountry" : "CO",
+    "ObjectVerNumberProfile" : null,
+    "ApplyWhenNotPostedFlag" : false,
+    "ExternalQualificationsStr" : "",
+    "InternalQualificationsStr" : "",
+    "InternalResponsibilitiesStr" : "<p><span style=\"font-family:'arial';font-size:small\"><strong>Funciones Principales: </strong></span><br /><br /><span style=\"font-family:'arial';font-size:small\">- Ejecutar las actividades establecidas en el plan de trabajo de la iniciativa definida por la dependenciadonde sea asignado. </span><br /><span style=\"font-family:'arial';font-size:small\">- Hacer seguimiento y reportar las variaciones que afecten el desarrollo del plan de trabajo de lainiciativa. </span><br /><span style=\"font-family:'arial';font-size:small\">- Presentar al superior inmediato los resultados del plan de trabajo desarrollado. </span><br /><span style=\"font-family:'arial';font-size:small\">- Controlar, soportar, documentar, conciliar, revelar, clasificar y medir adecuadamente el registro detodos los hechos económicos que le sean asignados, con el fin de contribuir a la calid </span><br /> </p><p><span style=\"font-family:'arial';font-size:small\"> </span></p><p> </p>",
+    "ExternalResponsibilitiesStr" : "<p><span style=\"font-family:'arial';font-size:small\"><strong>Funciones Principales: </strong></span><br /><br /><span style=\"font-family:'arial';font-size:small\">- Ejecutar las actividades establecidas en el plan de trabajo de la iniciativa definida por la dependenciadonde sea asignado. </span><br /><span style=\"font-family:'arial';font-size:small\">- Hacer seguimiento y reportar las variaciones que afecten el desarrollo del plan de trabajo de lainiciativa. </span><br /><span style=\"font-family:'arial';font-size:small\">- Presentar al superior inmediato los resultados del plan de trabajo desarrollado. </span><br /><span style=\"font-family:'arial';font-size:small\">- Controlar, soportar, documentar, conciliar, revelar, clasificar y medir adecuadamente el registro detodos los hechos económicos que le sean asignados, con el fin de contribuir a la calid </span><br /> </p><p><span style=\"font-family:'arial';font-size:small\"> </span></p><p> </p>",
+    "JobFunctionCode" : null,
+    "HotJobFlag" : false,
+    "TrendingFlag" : false,
+    "BeFirstToApplyFlag" : false,
+    "WorkplaceTypeCode" : null,
+    "WorkplaceType" : "",
+    "OtherRequisitionTitle" : null,
+    "NumberOfOpenings" : null,
+    "HiringManager" : null,
+    "Organization" : null,
+    "BusinessUnitId" : 300000028474833,
+    "LegalEmployerId" : 300000000734188,
+    "OrganizationId" : 300000797865170,
+    "WorkerType" : null,
+    "JobType" : null,
+    "WorkMonths" : null,
+    "WorkYears" : null,
+    "WorkHours" : null,
+    "WorkDays" : null,
+    "LegalEmployer" : null,
+    "BusinessUnit" : null,
+    "Department" : null,
+    "DomesticTravelRequired" : null,
+    "JobFunction" : null,
+    "secondaryLocations" : [ ],
+    "media" : [ ],
+    "workLocation" : [ {
+      "LocationId" : 300000028579172,
+      "LocationName" : "EDIFICIO EPM",
+      "AddressLine1" : "Carrera 58 No. 42 - 125",
+      "AddressLine2" : null,
+      "AddressLine3" : null,
+      "AddressLine4" : null,
+      "Building" : null,
+      "TownOrCity" : "Medellín",
+      "PostalCode" : null,
+      "Country" : "CO",
+      "Region1" : null,
+      "Region2" : "Antioquia",
+      "Region3" : null,
+      "Longitude" : "-74.67867",
+      "Latitude" : "6.25031"
+    } ],
+    "otherWorkLocations" : [ ],
+    "requisitionFlexFields" : [ {
+      "Prompt" : "Departamento (Dependencia)",
+      "Value" : "ÁREA SOLUCIONES TALENTO HUMANO Y ORGANIZACIÓN",
+      "ControlType" : "TextArea",
+      "SequenceNumber" : 2
+    }, {
+      "Prompt" : "Tipo de contrato",
+      "Value" : "Término indefinido",
+      "ControlType" : "SingleChoiceList",
+      "SequenceNumber" : 5
+    }, {
+      "Prompt" : "Salario",
+      "Value" : "4,643,480.99",
+      "ControlType" : "TextArea",
+      "SequenceNumber" : 6
+    }, {
+      "Prompt" : "Jornada laboral",
+      "Value" : "Tiempo completo",
+      "ControlType" : "SingleChoiceList",
+      "SequenceNumber" : 7
+    }, {
+      "Prompt" : "Título requerido",
+      "Value" : "Título pregrado tecnológico en campo amplio Administración de Empresas, Derecho y en Ingeniería, Industria y Construcción o en campos detallados: Gestión y Administración; Ingeniería y profesiones afines no clasificadas en otra parte de acuerdo con las funciones a desempeñar según lo descrito en la Clasificación Internacional Normalizada de la Educación adaptada para Colombia (CINE-F 2013 A.C).",
+      "ControlType" : "TextArea",
+      "SequenceNumber" : 11
+    }, {
+      "Prompt" : "Título posgrado requerido",
+      "Value" : "No requiere",
+      "ControlType" : "TextArea",
+      "SequenceNumber" : 15
+    }, {
+      "Prompt" : "Experiencia requerida",
+      "Value" : "No requiere",
+      "ControlType" : "TextArea",
+      "SequenceNumber" : 17
+    }, {
+      "Prompt" : "Experiencia / Ley 2043, Ley 2039 de 2020 y Decreto 952 de 2021",
+      "Value" : "Se reconoce como experiencia profesional y/o relacionada aquellas prácticas que se hayan realizado en el sector público y/o sector privado como opción para adquirir el correspondiente título, en cumplimiento de la Ley 2043 de 2020. Para los jóvenes entre 14 y 28 años de edad, como experiencia laboral previa se incluye la obtenida en: prácticas laborales, contratos de aprendizaje, judicatura, relación docencia de servicio del sector salud, servicio social obligatorio o voluntariados en los términos señalados en la referenciada normativa y la que sea expedida por el Departamento Administrativo de la Función Pública, en cumplimiento de la Ley 2039 de 2020 y en el Decreto 952 de 2021.",
+      "ControlType" : "TextArea",
+      "SequenceNumber" : 18
+    } ],
+    "primaryLocationCoordinates" : [ {
+      "GeographyNodeId" : 100000198255050,
+      "GeographyId" : 300000028488789,
+      "Latitude" : "6.24589",
+      "Longitude" : "-75.57457",
+      "CountryCode" : "CO"
+    } ],
+    "skills" : [ ]
+  } ],
+  "count" : 1,
+  "hasMore" : false,
+  "limit" : 499,
+  "offset" : 0,
+  "links" : [ {
+    "rel" : "self",
+    "href" : "https://hbcp.fa.us2.oraclecloud.com:443/hcmRestApi/resources/11.13.18.05/recruitingCEJobRequisitionDetails",
+    "name" : "recruitingCEJobRequisitionDetails",
+    "kind" : "collection"
+  } ]
+}
