@@ -102,6 +102,12 @@ export function makeDb(env) {
     async gepmOpen(now) {
       return parseGepmRows(await all("SELECT id, data, closes, status FROM gepm WHERE status = 'dated' AND closes > ? ORDER BY closes ASC LIMIT 20", now));
     },
+    // Lo mismo, pero solo si la sección está activa (gepm_mode = test | live): UNA consulta, sin leer la bandera aparte.
+    async gepmOpenIfActive(now) {
+      return parseGepmRows(
+        await all("SELECT id, data, closes, status FROM gepm WHERE status = 'dated' AND closes > ? AND (SELECT v FROM meta WHERE k = 'gepm_mode') IN ('test', 'live') ORDER BY closes ASC LIMIT 20", now),
+      );
+    },
     async gepmRow(id) {
       return parseGepmRows(await all('SELECT id, data, closes, status, notify, tested FROM gepm WHERE id = ?', String(id)))[0] ?? null;
     },

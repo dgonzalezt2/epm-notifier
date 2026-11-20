@@ -12,6 +12,8 @@ import { makeVault } from '../../src/lib/crypto.js';
 import { Budget } from '../../src/lib/telegram.js';
 import { consume, RetryLater } from '../../src/lib/consumer.js';
 import { handleUpdate } from '../../src/lib/handlers.js';
+import { matchingProfiles } from '../../src/lib/profiles.js';
+import { gepmAsJob } from '../../src/lib/gepm.js';
 import { runCron } from '../../src/lib/cron.js';
 import { MAX_MSG } from '../../src/lib/util.js';
 
@@ -870,5 +872,170 @@ describe('/gepmprueba: tres respuestas distintas y lectura del argumento', () =>
     assert.equal(W.sends.length, antes);
     await run('/gepmprueba@epmofertasbot 025-26', { chat: Number(SUBS.off), from: Number(SUBS.off) });
     assert.match(last(), /Comando no reconocido/);
+  });
+});
+
+// ---------- Perfiles: los filtros también incluyen las convocatorias vigentes de GrupoEPM ----------
+describe('filtros de Perfiles con convocatorias de GrupoEPM', () => {
+  const DAY = 864e5;
+  const put = (id, title, { closes = NOW0 + 2 * DAY, status = 'dated', where = 'el Edificio Inteligente EPM', pdf = 'https://www.grupo-epm.com/x/p.pdf', apply = 'https://login.airavirtual.com/postula/1?id=1', conds = [] } = {}) =>
+    W.D.raw
+      .prepare("INSERT OR REPLACE INTO gepm (id, data, closes, status, notify, tested, first_seen, updated) VALUES (?, ?, ?, ?, 'none', 0, 1, 1)")
+      .run(id, JSON.stringify({ title, people: 1, city: 'Medellín', where, conds, pdf, apply, hasTime: true }), closes, status);
+  const ask = async (chat, cmd) => {
+    const n = W.sends.length;
+    await W.press(chat, cmd);
+    return W.sends.slice(n);
+  };
+  const text = (msgs) => msgs.map((m) => m.html).join('\n');
+  const jobOf = (title, where = '') => gepmAsJob({ data: { title, where } });
+
+  test('con la sección apagada los filtros NO muestran GrupoEPM (aunque haya filas en la caché)', async () => {
+    await W.check(); // apagado: no descarga
+    put('025-26', 'TECNÓLOGO(A) DE COMUNICACIONES');
+    const out = text(await ask(SUBS.off, 'tecnologo'));
+    assert.ok(!/GRUPO EPM|025-26/.test(out));
+    assert.match(out, /oferta\(s\) abierta\(s\)/);
+  });
+
+  test('cargo Tecnólogo con la página real: ofertas del portal idénticas y, después, el bloque GRUPO EPM con la 025-26', async () => {
+    const base = await ask(SUBS.off, 'tecnologo'); // modo apagado = como era antes del cambio
+    W.setMode('test');
+    await W.check();
+    W.sends.length = 0;
+    const msgs = await ask(SUBS.off, 'tecnologo');
+    const html = text(msgs);
+    const before = text(base);
+    assert.ok(html.startsWith(before.trimEnd().slice(0, 400)), 'el bloque del portal empieza igual que antes');
+    for (const line of before.split(/\r?\n/).filter((l) => /<a href|Cierra|Ubicaci|📍/.test(l))) assert.ok(html.includes(line), 'cada línea del portal sigue igual: ' + line.slice(0, 40));
+    const at = html.indexOf('GRUPO EPM</b>');
+    assert.ok(at > before.trimEnd().length - 200, 'GrupoEPM va después del portal');
+    assert.match(html, /1 convocatoria\(s\) vigente\(s\) de la Fundación EPM/);
+    assert.match(html, /🏢 GRUPO EPM · <a href="https:\/\/www\.grupo-epm\.com[^"]*">025-26 TECNÓLOGO\(A\) DE COMUNICACIONES<\/a>/);
+    assert.match(html, /Cierra: 22 nov 2026 \(en 2 días\)/);
+    assert.match(html, /📍 Ciudad: Medellín/);
+    assert.match(html, /👥 Personas requeridas: 1/);
+    assert.match(html, /🏗️ El cargo se desarrolla en: el Edificio Inteligente EPM/);
+    assert.match(html, /<a href="https:\/\/login\.airavirtual\.com[^"]*">Postúlate aquí<\/a>/);
+    assert.deepEqual(htmlProblems(html), []);
+    assert.equal(msgs.at(-1).kb[0][0].callback_data, 'perfiles');
+    // las ofertas del portal no llevan etiqueta
+    assert.ok(!/GRUPO EPM/.test(html.slice(0, at)));
+  });
+
+  test('cargo Profesional, Técnico y Auxiliar/Bachiller: no aparece la 025-26', async () => {
+    W.setMode('test');
+    await W.check();
+    for (const p of ['profesional', 'tecnico', 'auxiliar']) assert.ok(!/025-26|GRUPO EPM/.test(text(await ask(SUBS.off, p))), p);
+  });
+
+  test('área Comunicaciones (la palabra «comunicaciones» ya es del perfil existente): sí aparece; Sistemas y Civil no', async () => {
+    W.setMode('test');
+    await W.check();
+    assert.match(text(await ask(SUBS.off, 'comunicaciones')), /025-26/);
+    for (const p of ['sistemas', 'civil']) assert.ok(!/025-26/.test(text(await ask(SUBS.off, p))), p);
+  });
+
+  test('«Todas las ofertas» (/ofertas) no cambia: no incluye GrupoEPM', async () => {
+    W.setMode('test');
+    await W.check();
+    assert.ok(!/GRUPO EPM|025-26/.test(text(await ask(SUBS.off, 'ofertas'))));
+  });
+
+  test('misma regla de visibilidad que el botón: test y live para cualquier chat (usuario normal, suscriptor y admin); off, para nadie', async () => {
+    put('030-26', 'TECNÓLOGO(A) DE PRUEBA');
+    for (const [mode, shown] of [['off', false], ['test', true], ['live', true]]) {
+      W.setMode(mode);
+      for (const chat of [SUBS.off, SUBS.on1, SUBS.all, ADMIN]) {
+        const filtro = /030-26/.test(text(await ask(chat, 'tecnologo')));
+        const boton = /030-26/.test(text(await ask(chat, 'gepm')));
+        assert.equal(filtro, shown, `${mode} filtro ${chat}`);
+        assert.equal(boton, shown, `${mode} botón ${chat}`);
+      }
+    }
+  });
+
+  test('solo hay de GrupoEPM: no se muestra un vacío del portal; sin ninguna de las dos: el mensaje de siempre', async () => {
+    W.setMode('test');
+    const vacio = text(await ask(SUBS.off, 'juridica'));
+    assert.match(vacio, /No hay ofertas abiertas para <b>Perfil Jurídica<\/b> en este momento\./);
+    put('031-26', 'ABOGADO(A) DE CONTRATACIÓN');
+    const out = text(await ask(SUBS.off, 'juridica'));
+    assert.ok(!/No hay ofertas abiertas|0 oferta/.test(out));
+    assert.match(out, /^📋 <b>Perfil Jurídica<\/b>\n/);
+    assert.match(out, /GRUPO EPM<\/b>: 1 convocatoria\(s\)/);
+    assert.match(out, /031-26 ABOGADO\(A\) DE CONTRATACIÓN/);
+  });
+
+  test('cerradas, canceladas, sin fecha o vencidas no aparecen', async () => {
+    W.setMode('test');
+    put('040-26', 'TECNÓLOGO(A) CERRADO', { status: 'closed', closes: null });
+    put('041-26', 'TECNÓLOGO(A) CANCELADO', { status: 'cancelled' });
+    put('042-26', 'TECNÓLOGO(A) VENCIDO', { closes: NOW0 - 1000 });
+    put('043-26', 'TECNÓLOGO(A) VIGENTE');
+    const out = text(await ask(SUBS.off, 'tecnologo'));
+    assert.match(out, /043-26/);
+    assert.ok(!/04[012]-26/.test(out));
+  });
+
+  test('clasificación por cargo: mayúsculas, tildes, «(A)/(a)»; el título sin nivel no sale en ningún filtro de cargo', () => {
+    const cargos = (t) => matchingProfiles(jobOf(t)).filter((p) => ['profesional', 'tecnologo', 'tecnico', 'auxiliar'].includes(p));
+    assert.deepEqual(cargos('PROFESIONAL A DE PLANEACIÓN'), ['profesional']);
+    assert.deepEqual(cargos('Profesional (a) de Gestión'), ['profesional']);
+    assert.deepEqual(cargos('TECNÓLOGO(A) DE COMUNICACIONES'), ['tecnologo']);
+    assert.deepEqual(cargos('tecnologo en sistemas'), ['tecnologo']);
+    assert.deepEqual(cargos('TÉCNICO(A) DE APOYO'), ['tecnico']);
+    assert.deepEqual(cargos('Tecnico (a) administrativo'), ['tecnico']);
+    assert.deepEqual(cargos('AUXILIAR DE ARCHIVO'), ['auxiliar']);
+    assert.deepEqual(cargos('BACHILLER (A) DE APOYO'), ['auxiliar']);
+    assert.deepEqual(cargos('MEDIADOR(A) SOCIAL'), []);
+    assert.deepEqual(matchingProfiles(jobOf('MEDIADOR(A) SOCIAL', 'el Edificio Inteligente EPM')), []);
+  });
+
+  test('mismas palabras clave que el portal: gepmAsJob solo pasa título y lugar, y escapa lo no confiable', async () => {
+    assert.deepEqual(jobOf('X <b>Y</b>', 'Z'), { Title: 'X <b>Y</b>', ShortDescriptionStr: 'Z' });
+    W.setMode('test');
+    put('050-26', 'TECNÓLOGO(A) <script>alert(1)</script> & CIA', { pdf: 'https://author-p98763-e1046621.adobeaemcloud.com/x.pdf', apply: 'https://evaluado.kudert.com/x' });
+    const out = text(await ask(SUBS.off, 'tecnologo'));
+    assert.ok(!/<script/.test(out));
+    assert.match(out, /050-26 TECNÓLOGO\(A\)[^<]*&amp; CIA/);
+    assert.ok(!/adobeaemcloud|kudert/.test(out), 'los enlaces no permitidos se descartan: la tarjeta sale sin ellos');
+    assert.deepEqual(htmlProblems(out), []);
+  });
+
+  test('muchas convocatorias: el mensaje se divide, ninguno pasa de 4096 y no se corta ningún enlace', async () => {
+    W.setMode('test');
+    for (let i = 0; i < 20; i++) put(`1${String(i).padStart(2, '0')}-26`, `TECNÓLOGO(A) ${'DE LA ÁREA DE PRUEBA '.repeat(4)}${i}`, { where: 'una sede muy lejana con un nombre muy, muy largo '.repeat(3), conds: ['Esta vacante aplica para personas residentes del municipio relacionado y con condiciones especiales ' + i] });
+    const msgs = await ask(SUBS.off, 'tecnologo');
+    assert.ok(msgs.length > 1, 'se dividió');
+    for (const m of msgs) {
+      assert.ok(m.html.length <= MAX_MSG, `mensaje de ${m.html.length}`);
+      assert.deepEqual(htmlProblems(m.html), []);
+    }
+    assert.ok(msgs.filter((m) => m.kb).length >= 1 && msgs.at(-1).kb);
+    assert.match(text(msgs), /GRUPO EPM<\/b>: \d+ convocatoria/);
+  });
+
+  test('costo: los filtros solo leen D1 (una consulta más), nunca la página, y no aparece nada sensible en los logs', async () => {
+    W.setMode('test');
+    await W.check();
+    const logs = [];
+    const orig = [console.log, console.error, console.warn];
+    console.log = console.error = console.warn = (...a) => logs.push(a.join(' '));
+    const fetches = W.fetches.gepm;
+    let sin, con;
+    try {
+      W.D.trips = 0;
+      await ask(SUBS.off, 'ofertas'); // el camino de antes del cambio: sin GrupoEPM
+      sin = W.D.trips;
+      W.D.trips = 0;
+      await ask(SUBS.off, 'tecnologo');
+      con = W.D.trips;
+    } finally {
+      [console.log, console.error, console.warn] = orig;
+    }
+    assert.equal(W.fetches.gepm, fetches, 'no descarga la página');
+    assert.equal(con - sin, 1, `viajes a D1: sin=${sin} con=${con}`);
+    assert.deepEqual(logs, []);
   });
 });

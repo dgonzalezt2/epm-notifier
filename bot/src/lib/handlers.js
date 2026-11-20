@@ -8,7 +8,7 @@ import { formatOffer, jobFromListing } from './offer.js';
 import { isClosed } from './dates.js';
 import { fetchListing } from './epm.js';
 import { isGone } from './telegram.js';
-import { formatGepm, GEPM_URL, fmtWhen } from './gepm.js';
+import { formatGepm, gepmAsJob, GEPM_URL, fmtWhen } from './gepm.js';
 
 const btn = (text, data) => ({ text, callback_data: data });
 const mainMenu = () => [
@@ -120,7 +120,9 @@ async function showSubscription(c, chatId, messageId, sub, note = '') {
 // ---------- ofertas ----------
 const startMs = (r) => Date.parse(r.lite?.start || r.job.PostedDate) || 0;
 
-export async function sendOffers(c, chatId, label, filter = () => true) {
+// `withGepm` (solo los filtros de Perfiles): añade, DESPUÉS de las ofertas del portal, las convocatorias vigentes de GrupoEPM que
+// cumplen el mismo filtro, con la misma regla de visibilidad que el botón 🏢 GrupoEPM (gepm_mode = test | live, para cualquier chat).
+export async function sendOffers(c, chatId, label, filter = () => true, { withGepm = false } = {}) {
   const { db, env, tg, budget } = c;
   let rows = await db.offers();
   if (!rows.length) {
@@ -137,9 +139,18 @@ export async function sendOffers(c, chatId, label, filter = () => true) {
   const open = rows.filter((r) => !isClosed(r.lite, now));
   const closed = rows.length - open.length;
   const note = closed ? `\nℹ️ ${closed} oferta(s) cerrada(s) no se muestran.` : '';
-  if (!open.length) return c.send(chatId, `No hay ofertas abiertas para <b>${esc(label)}</b> en este momento.${note}`, backMenu());
+  const gepm = withGepm ? (await db.gepmOpenIfActive(now)).filter((r) => filter(gepmAsJob(r))) : [];
+  if (!open.length && !gepm.length) return c.send(chatId, `No hay ofertas abiertas para <b>${esc(label)}</b> en este momento.${note}`, backMenu());
 
-  return sendCards(c, chatId, `📋 <b>${esc(label)}</b>: ${open.length} oferta(s) abierta(s)\n`, open.map((r) => formatOffer(r.job, r.lite, { now })), note, backMenu(), '…hay más ofertas de las que caben aquí. Usa /perfiles para filtrar.');
+  const cards = open.map((r) => formatOffer(r.job, r.lite, { now }));
+  if (gepm.length) {
+    // El rótulo del bloque va pegado a su primera tarjeta (nunca queda huérfano al final de un mensaje).
+    const cardsG = gepm.map((r) => formatGepm(r, { now, tag: true }));
+    cardsG[0] = `━━━━━━━━━━\n🏢 <b>GRUPO EPM</b>: ${gepm.length} convocatoria(s) vigente(s) de la Fundación EPM\n\n${cardsG[0]}`;
+    cards.push(...cardsG);
+  }
+  const header = open.length ? `📋 <b>${esc(label)}</b>: ${open.length} oferta(s) abierta(s)\n` : `📋 <b>${esc(label)}</b>\n`;
+  return sendCards(c, chatId, header, cards, note, backMenu(), '…hay más ofertas de las que caben aquí. Usa /perfiles para filtrar.');
 }
 
 // Envía tarjetas agrupadas en mensajes de ≤ MAX_MSG caracteres (se parten ENTRE tarjetas: nunca se corta un enlace ni una entidad).
@@ -245,7 +256,7 @@ export async function handleCommand(c, cmd, chat, ctx2 = {}) {
     );
   }
   if (cmd === 'ofertas') return sendOffers(c, chatId, 'Todas las ofertas');
-  if (PROFILES[cmd]) return sendOffers(c, chatId, `Perfil ${shortLabel(cmd)}`, (job) => jobMatchesProfile(job, cmd));
+  if (PROFILES[cmd]) return sendOffers(c, chatId, `Perfil ${shortLabel(cmd)}`, (job) => jobMatchesProfile(job, cmd), { withGepm: true });
   return c.send(chatId, 'Comando no reconocido. Usa /comandos.', mainMenu());
 }
 

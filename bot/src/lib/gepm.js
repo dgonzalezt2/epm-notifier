@@ -333,11 +333,12 @@ const hhmm = (ms) => {
 };
 
 // Tarjeta de una convocatoria (mismo estilo que las de ofertas). `row` = { id, closes, status, data }.
-export function formatGepm(row, { isNew = false, now = Date.now() } = {}) {
+export function formatGepm(row, { isNew = false, now = Date.now(), tag = false } = {}) {
   const d = cleanGepm(row.data);
   const id = /^\d{3}-\d{2}$/.test(String(row.id)) ? row.id : '???-??';
   const label = `${id} ${d.title}`;
-  const head = (isNew ? '🆕 ' : '') + '🏢 ' + (d.pdf ? `<a href="${escAttr(d.pdf)}">${esc(label)}</a>` : `<b>${esc(label)}</b>`);
+  // `tag`: en los filtros de Perfiles, mezclados con ofertas del portal, cada tarjeta lleva la etiqueta de su origen.
+  const head = (isNew ? '🆕 ' : '') + (tag ? '🏢 GRUPO EPM · ' : '🏢 ') + (d.pdf ? `<a href="${escAttr(d.pdf)}">${esc(label)}</a>` : `<b>${esc(label)}</b>`);
   let when;
   if (row.status === 'cancelled') when = '⏰ Proceso cancelado';
   else if (Number.isFinite(row.closes)) {
@@ -356,6 +357,13 @@ export function formatGepm(row, { isNew = false, now = Date.now() } = {}) {
   if (d.apply) lines.push(`👉 <a href="${escAttr(d.apply)}">Postúlate aquí</a>`);
   return lines.join('\n');
 }
+
+// La convocatoria con la forma que esperan los perfiles de profiles.js (mismas palabras clave que las ofertas del portal):
+// el título y, en lugar de la descripción corta, el lugar donde se desarrolla el cargo (la tarjeta no guarda más texto).
+export const gepmAsJob = (row) => {
+  const d = cleanGepm(row.data);
+  return { Title: d.title, ShortDescriptionStr: d.where || '' };
+};
 
 // Fecha corta del último análisis (para los mensajes de estado).
 export const fmtWhen = (ms) => (Number.isFinite(ms) ? `${fmtDay(bogotaDay(ms))} ${hhmm(ms)}` : 'nunca');
