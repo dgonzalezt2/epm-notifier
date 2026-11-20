@@ -4,7 +4,7 @@ import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { FIX, htmlProblems, listing, detail } from '../helpers.mjs';
-import worker from '../../src/index.js';
+import worker, { slimUpdate } from '../../src/index.js';
 import { jobFromListing } from '../../src/lib/offer.js';
 import { makeD1 } from './d1shim.mjs';
 import { makeDb } from '../../src/lib/db.js';
@@ -626,7 +626,7 @@ describe('administración de GrupoEPM', () => {
     assert.equal(W.sends.length, 2);
     assert.equal(W.D.raw.prepare('SELECT COUNT(*) n FROM sent').get().n, 0);
     await W.say(ADMIN, '/gepmprueba 999-99');
-    assert.match(W.sends.at(-1).html, /Uso: \/gepmprueba/);
+    assert.match(W.sends.at(-1).html, /No encuentro la convocatoria/);
     await W.say(SUBS.off, '/gepmprueba 025-26');
     assert.match(W.sends.at(-1).html, /Comando no reconocido/);
   });
@@ -790,5 +790,85 @@ describe('aislamiento en la cola: GrupoEPM no frena a las ofertas del portal', (
     const toml = readFileSync(new URL('../../wrangler.toml', import.meta.url), 'utf8');
     assert.match(toml, /max_batch_size = 1/);
     assert.match(toml, /max_retries = 3/);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// /gepmprueba con el mensaje REAL de Telegram (con entities, from, date...) pasando por el saneado del Worker
+// ---------------------------------------------------------------------------------------------------------------------
+describe('/gepmprueba: tres respuestas distintas y lectura del argumento', () => {
+  // Un mensaje tal como lo entrega Telegram a un comando con argumento.
+  const real = (text, { chat = Number(ADMIN), from = Number(ADMIN) } = {}) => ({
+    update_id: 700000 + Math.floor(Math.random() * 1e5),
+    message: {
+      message_id: 321,
+      from: { id: from, is_bot: false, first_name: 'Administrador', language_code: 'es' },
+      chat: { id: chat, first_name: 'Administrador', type: 'private' },
+      date: 1795167000,
+      text,
+      entities: [{ offset: 0, length: text.split(' ')[0].length, type: 'bot_command' }],
+    },
+  });
+  const run = async (text, opts) => {
+    const slim = slimUpdate(real(text, opts));
+    assert.ok(slim, 'el Worker deja pasar el mensaje');
+    assert.equal(slim.message.text, text);
+    return handleUpdate(W.ctx(), slim);
+  };
+  const last = () => W.sends.at(-1)?.html;
+
+  test('caché VACÍA (aún no hubo revisión): lo dice, con «025-26» y con el @nombre del bot', async () => {
+    W.setMode('test');
+    assert.equal(W.rows().length, 0);
+    for (const t of ['/gepmprueba 025-26', '/gepmprueba@epmofertasbot 025-26', '/gepmprueba   025-26  ', '/GepmPrueba@EPMOfertasBot 025-26']) {
+      await run(t);
+      assert.equal(last(), 'Aún no hay convocatorias en la caché (la primera revisión se hace en la próxima hora).', t);
+    }
+    assert.equal(W.sends.length, 4);
+  });
+  test('con la caché llena: «025-26» (con y sin @nombre del bot) muestra la vista previa solo al administrador', async () => {
+    W.setMode('test');
+    await W.check();
+    for (const t of ['/gepmprueba 025-26', '/gepmprueba@epmofertasbot 025-26']) {
+      const antes = W.sends.length;
+      await run(t);
+      assert.equal(W.sends.length, antes + 2, t);
+      assert.match(W.sends.at(-2).html, /Vista previa del aviso/);
+      assert.match(last(), /^🆕 🏢 <a href=.+025-26 TECNÓLOGO\(A\) DE COMUNICACIONES/);
+      assert.ok(W.sends.slice(antes).every((s) => s.chat === ADMIN));
+    }
+  });
+  test('convocatoria que no está (caché con datos): «No encuentro esa convocatoria»', async () => {
+    W.setMode('test');
+    await W.check();
+    await run('/gepmprueba 999-99');
+    assert.equal(last(), 'No encuentro la convocatoria <code>999-99</code> en la caché.');
+    await run('/gepmprueba@epmofertasbot 001-20');
+    assert.equal(last(), 'No encuentro la convocatoria <code>001-20</code> en la caché.');
+    assert.deepEqual(htmlProblems(last()), []);
+  });
+  test('formato inválido: uso con un ejemplo (sin argumento, mal escrito o con texto de más)', async () => {
+    W.setMode('test');
+    await W.check();
+    for (const t of ['/gepmprueba', '/gepmprueba@epmofertasbot', '/gepmprueba 25-26', '/gepmprueba 025-2', '/gepmprueba 0251-26', '/gepmprueba abc', '/gepmprueba 025_26', '/gepmprueba <b>']) {
+      await run(t);
+      assert.equal(last(), 'Uso: /gepmprueba NNN-AA (por ejemplo, <code>025-26</code>).', t);
+    }
+  });
+  test('los tres casos también con la caché vacía: el formato inválido se detecta antes que «no hay caché»', async () => {
+    W.setMode('test');
+    await run('/gepmprueba nada');
+    assert.match(last(), /^Uso:/);
+    await run('/gepmprueba 025-26');
+    assert.match(last(), /^Aún no hay convocatorias en la caché/);
+  });
+  test('un comando dirigido a OTRO bot no se atiende, y un usuario normal sigue viendo «Comando no reconocido»', async () => {
+    W.setMode('test');
+    const antes = W.sends.length;
+    const r = await run('/gepmprueba@otrobot 025-26');
+    assert.deepEqual(r, { ignored: true });
+    assert.equal(W.sends.length, antes);
+    await run('/gepmprueba@epmofertasbot 025-26', { chat: Number(SUBS.off), from: Number(SUBS.off) });
+    assert.match(last(), /Comando no reconocido/);
   });
 });

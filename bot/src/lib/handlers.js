@@ -272,8 +272,13 @@ async function handleAdmin(c, cmd, rest, chat, isAdmin) {
     if (!isAdmin || chat.type !== 'private') return false;
     if (cmd === 'gepmprueba') {
       const id = (rest[0] || '').trim();
-      const row = /^\d{3}-\d{2}$/.test(id) ? await db.gepmRow(id) : null;
-      if (!row) return deny('Uso: /gepmprueba NNN-AA (una convocatoria que ya esté en la caché).');
+      // Tres casos distintos: formato inválido, caché vacía (aún no hubo ninguna revisión) y convocatoria que no está.
+      if (!/^\d{3}-\d{2}$/.test(id)) return deny('Uso: /gepmprueba NNN-AA (por ejemplo, <code>025-26</code>).');
+      const row = await db.gepmRow(id);
+      if (!row) {
+        const n = (await db.first('SELECT COUNT(*) AS n FROM gepm'))?.n ?? 0;
+        return deny(n ? `No encuentro la convocatoria <code>${esc(id)}</code> en la caché.` : 'Aún no hay convocatorias en la caché (la primera revisión se hace en la próxima hora).');
+      }
       await reply('🧪 <i>Vista previa del aviso (solo para ti):</i>');
       await reply(formatGepm(row, { isNew: true, now: c.now() }));
       return true;
