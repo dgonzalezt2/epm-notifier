@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { listing, detail } from '../helpers.mjs';
+import { listing, detail, FIX } from '../helpers.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = resolve(here, '../..');
@@ -18,7 +18,7 @@ export const SECRET = 'prueba-' + 'secreto-'.repeat(6);
 export const BOT_TOKEN = '12345:FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE'; // falso, con otra forma que un token real
 export const STATE_KEY = 'clave-de-estado-de-prueba-larga-y-aleatoria-0123456789';
 export const ADMIN = 5000001;
-export const PORTS = { worker: 8811, epm: 9811, tg: 9812, gh: 9813 };
+export const PORTS = { worker: 8811, epm: 9811, tg: 9812, gh: 9813, gepm: 9814 };
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function until(fn, { timeout = 15000, every = 150, label = '' } = {}) {
@@ -31,12 +31,25 @@ export async function until(fn, { timeout = 15000, every = 150, label = '' } = {
   }
 }
 
+// ---------- página GrupoEPM simulada: el extracto REAL, con la fecha de cierre de la más nueva desplazada al futuro ----------
+const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+export const esDate = (ms) => {
+  const t = new Date(ms - 5 * 3600e3);
+  return DIAS[t.getUTCDay()] + ' ' + t.getUTCDate() + ' de ' + MESES[t.getUTCMonth()] + ' de ' + t.getUTCFullYear();
+};
+export const gepmBlock = (id, closesMs, title = 'PROFESIONAL DE PRUEBA') =>
+  '<div class="title"><div id="title-' + id + '" class="cmp-title"><h3 class="cmp-title__text"><a class="cmp-title__link" data-cmp-clickable href="/content/dam/x/' + id + '.pdf" target="_blank">' + id + ' ' + title + ': Fecha de cierre ' + esDate(closesMs) + ' - 23:59 hrs.</a></h3></div></div>\n' +
+  '<div class="text"><div id="text-' + id + '" class="cmp-text"><p>Se requiere una (1) persona para trabajar en la ciudad de Medellín, el cargo se desarrollará principalmente en el Edificio Inteligente EPM, sin embargo, podrá apoyar los programas y proyectos donde se requiera.</p><p><b><a href="https://login.airavirtual.com/postula/' + id + '?id&#61;1">¡Postúlate aquí!</a></b></p></div></div>\n' +
+  '<div class="separator"><div class="cmp-separator"><hr/></div></div>\n';
+
 // ---------- servidores simulados ----------
 export function makeFakes() {
   const f = {
     epm: { down: false, ids: listing().map((j) => String(j.Id)), failDetail: new Set(), calls: [], closedIds: new Set(), delayMs: 0 },
     tg: { calls: [], fail: new Map(), n: 100 },
     gh: { calls: [], branch: false, files: new Map() },
+    gepm: { calls: [], extra: '', broken: false, etag: 'W/"v1"' },
   };
 
   const epmSrv = http.createServer((req, res) => {
@@ -88,6 +101,22 @@ export function makeFakes() {
     });
   });
 
+  const gepmSrv = http.createServer((req, res) => {
+    f.gepm.calls.push({ url: req.url, inm: req.headers['if-none-match'] || null });
+    if (req.headers['if-none-match'] === f.gepm.etag) {
+      res.writeHead(304, { etag: f.gepm.etag });
+      return res.end();
+    }
+    let p = readFileSync(FIX + '/gepm-convocatorias.html', 'utf8').replaceAll('domingo 22 de noviembre de 2026', esDate(Date.now() + 3 * 864e5));
+    if (f.gepm.extra) {
+      const at = p.lastIndexOf('<div class="title">', p.indexOf('<h3 class="cmp-title__text">'));
+      p = p.slice(0, at) + f.gepm.extra + p.slice(at);
+    }
+    if (f.gepm.broken) p = '<html><body><h1>Sitio en mantenimiento</h1></body></html>';
+    res.writeHead(200, { 'content-type': 'text/html;charset=utf-8', etag: f.gepm.etag });
+    res.end(p);
+  });
+
   const ghSrv = http.createServer((req, res) => {
     let b = '';
     req.on('data', (c) => (b += c));
@@ -109,7 +138,7 @@ export function makeFakes() {
       out(404, {});
     });
   });
-  return { f, servers: [[epmSrv, PORTS.epm], [tgSrv, PORTS.tg], [ghSrv, PORTS.gh]] };
+  return { f, servers: [[epmSrv, PORTS.epm], [tgSrv, PORTS.tg], [ghSrv, PORTS.gh], [gepmSrv, PORTS.gepm]] };
 }
 
 // ---------- Worker ----------
@@ -127,6 +156,7 @@ export async function startWorker(extraVars = {}) {
     EPM_API: `http://127.0.0.1:${PORTS.epm}`,
     TELEGRAM_API: `http://127.0.0.1:${PORTS.tg}`,
     GITHUB_API: `http://127.0.0.1:${PORTS.gh}`,
+    GEPM_URL: `http://127.0.0.1:${PORTS.gepm}/page`,
     ...extraVars,
   };
   writeFileSync(resolve(ROOT, '.dev.vars'), Object.entries(vars).map(([k, v]) => `${k}=${v}`).join('\n') + '\n');

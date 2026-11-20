@@ -240,7 +240,14 @@ describe('cambios de suscripción (absolutos e idempotentes)', () => {
     assert.deepEqual(subMutation('sub:civil:0')(base).profiles, []);
     assert.equal(subMutation('sub:all:1')(base).all, true);
     assert.deepEqual(subMutation('sub:civil')(base).profiles, [], 'botón antiguo: alterna');
-    assert.deepEqual(subMutation('unsub')(base), { all: false, profiles: [] });
+    assert.deepEqual(subMutation('unsub')(base), { all: false, profiles: [], gepm: false });
+    // GrupoEPM: apagado por defecto, absoluto e idempotente, y no toca los demás avisos
+    assert.equal(subMutation('sub:gepm:1')(base).gepm, true);
+    assert.equal(subMutation('sub:gepm:1')(subMutation('sub:gepm:1')(base)).gepm, true, 'activar dos veces = igual');
+    assert.equal(subMutation('sub:gepm:0')({ ...base, gepm: true }).gepm, false);
+    assert.equal(subMutation('sub:gepm')(base).gepm, true, 'botón de alternar');
+    assert.deepEqual(subMutation('sub:gepm:1')(base).profiles, base.profiles);
+    assert.equal(subMutation('unsub')({ ...base, gepm: true }).gepm, false, 'cancelar avisos también apaga GrupoEPM');
     assert.equal(subMutation('sub:inventado:1'), null);
     assert.equal(subMutation('sub:../x:1'), null);
     assert.equal(subMutation('ofertas'), null);

@@ -8,11 +8,13 @@ import { formatOffer, jobFromListing } from './offer.js';
 import { isClosed } from './dates.js';
 import { fetchListing } from './epm.js';
 import { isGone } from './telegram.js';
+import { formatGepm, GEPM_URL, fmtWhen } from './gepm.js';
 
 const btn = (text, data) => ({ text, callback_data: data });
 const mainMenu = () => [
   [btn('📋 Ofertas', 'ofertas'), btn('🎯 Perfiles', 'perfiles')],
-  [btn('🔔 Suscribirme', 'suscribir'), btn('❓ Ayuda', 'ayuda')],
+  [btn('🏢 GrupoEPM', 'gepm'), btn('🔔 Suscribirme', 'suscribir')],
+  [btn('❓ Ayuda', 'ayuda')],
 ];
 const profilesMenu = () => [[btn('🎓 Por carrera / área', 'areas')], [btn('🧱 Por cargo / nivel', 'cargos')], [btn('⬅️ Menú', 'comandos')]];
 const profileGrid = (names) => {
@@ -21,6 +23,7 @@ const profileGrid = (names) => {
   rows.push([btn('⬅️ Perfiles', 'perfiles'), btn('Menú', 'comandos')]);
   return rows;
 };
+const backToMenu = () => [[btn('⬅️ Menú', 'comandos')]];
 const backMenu = () => [[btn('🎯 Perfiles', 'perfiles'), btn('⬅️ Menú', 'comandos')]];
 const shortLabel = (p) => profileLabel(p).replace(/^\S+\s/, '');
 
@@ -28,14 +31,17 @@ export const adminId = (env) => String(env.TELEGRAM_CHAT_ID || '').split(',')[0]
 const MAX_SUBS = (env) => Number(env.MAX_SUBS) || 500;
 
 // ---------- suscripciones ----------
-const emptySub = (chat) => ({ chat: String(chat), all: false, profiles: [] });
-const sameSub = (a, b) => a.all === b.all && a.profiles.length === b.profiles.length && a.profiles.every((p) => b.profiles.includes(p));
-const isEmpty = (s) => !s.all && !s.profiles.length;
+// `gepm`: avisos de convocatorias nuevas de la Fundación EPM (GrupoEPM). Apagado por defecto; va dentro del mismo registro cifrado.
+const emptySub = (chat) => ({ chat: String(chat), all: false, profiles: [], gepm: false });
+const sameSub = (a, b) => a.all === b.all && !!a.gepm === !!b.gepm && a.profiles.length === b.profiles.length && a.profiles.every((p) => b.profiles.includes(p));
+const isEmpty = (s) => !s.all && !s.profiles.length && !s.gepm;
 
 function subSummary(sub) {
   if (!sub || isEmpty(sub)) return 'Ahora mismo no recibes avisos.';
-  if (sub.all) return 'Recibes <b>todas</b> las ofertas nuevas.';
-  return `Recibes las ofertas nuevas de: ${sub.profiles.map((p) => esc(shortLabel(p))).join(', ')}.`;
+  const g = sub.gepm ? 'Recibes también las convocatorias nuevas de <b>GrupoEPM</b> (Fundación EPM).' : '';
+  if (sub.all) return 'Recibes <b>todas</b> las ofertas nuevas.' + (g ? '\n' + g : '');
+  if (!sub.profiles.length) return g;
+  return `Recibes las ofertas nuevas de: ${sub.profiles.map((p) => esc(shortLabel(p))).join(', ')}.` + (g ? '\n' + g : '');
 }
 // Los botones llevan el estado DESEADO (…:1 activar, …:0 quitar), así pulsar dos veces el mismo botón no lo deshace por accidente.
 function subscribeMenu(sub) {
@@ -46,6 +52,7 @@ function subscribeMenu(sub) {
   for (let i = 0; i < names.length; i += 2) {
     rows.push(names.slice(i, i + 2).map((p) => btn(`${mark(s.profiles.includes(p))}${profileLabel(p)}`, `sub:${p}:${s.profiles.includes(p) ? 0 : 1}`)));
   }
+  rows.push([btn(`${mark(s.gepm)}🏢 Avisos GrupoEPM (Fundación EPM)`, `sub:gepm:${s.gepm ? 0 : 1}`)]);
   rows.push([btn('🔕 Cancelar avisos', 'unsub'), btn('⬅️ Menú', 'comandos')]);
   return rows;
 }
@@ -53,15 +60,16 @@ function subscribeMenu(sub) {
 // Interpreta el comando de suscripción. Devuelve una función que transforma la suscripción, o null si no es válido.
 //  sub:<perfil>:1|0  /  sub:all:1|0  (absolutos)    sub:<perfil>  /  sub:all  (alternar: botones de mensajes antiguos)    unsub
 export function subMutation(cmd) {
-  if (cmd === 'unsub') return () => ({ all: false, profiles: [] });
+  if (cmd === 'unsub') return () => ({ all: false, profiles: [], gepm: false });
   const m = /^sub:([a-z]+)(?::([01]))?$/.exec(cmd);
   if (!m) return null;
   const [, what, want] = m;
-  if (what !== 'all' && !PROFILES[what]) return null;
+  if (what !== 'all' && what !== 'gepm' && !PROFILES[what]) return null;
   return (s) => {
-    const has = what === 'all' ? s.all : s.profiles.includes(what);
+    const has = what === 'all' ? s.all : what === 'gepm' ? !!s.gepm : s.profiles.includes(what);
     const on = want === undefined ? !has : want === '1';
     if (what === 'all') return { ...s, all: on };
+    if (what === 'gepm') return { ...s, gepm: on };
     return { ...s, profiles: on ? [...new Set([...s.profiles, what])] : s.profiles.filter((p) => p !== what) };
   };
 }
@@ -131,15 +139,21 @@ export async function sendOffers(c, chatId, label, filter = () => true) {
   const note = closed ? `\nℹ️ ${closed} oferta(s) cerrada(s) no se muestran.` : '';
   if (!open.length) return c.send(chatId, `No hay ofertas abiertas para <b>${esc(label)}</b> en este momento.${note}`, backMenu());
 
+  return sendCards(c, chatId, `📋 <b>${esc(label)}</b>: ${open.length} oferta(s) abierta(s)\n`, open.map((r) => formatOffer(r.job, r.lite, { now })), note, backMenu(), '…hay más ofertas de las que caben aquí. Usa /perfiles para filtrar.');
+}
+
+// Envía tarjetas agrupadas en mensajes de ≤ MAX_MSG caracteres (se parten ENTRE tarjetas: nunca se corta un enlace ni una entidad).
+// Respeta el presupuesto de subpeticiones; el teclado va en el último mensaje.
+async function sendCards(c, chatId, header, cards, note, kb, moreText) {
   const chunks = [];
-  let msg = `📋 <b>${esc(label)}</b>: ${open.length} oferta(s) abierta(s)\n`;
-  for (const r of open) {
-    const card = '\n' + formatOffer(r.job, r.lite, { now }) + '\n';
-    if (msg.length + card.length > MAX_MSG) {
-      chunks.push(msg); // los mensajes se parten entre ofertas: nunca se corta un enlace
+  let msg = header;
+  for (const card of cards) {
+    const piece = '\n' + card + '\n';
+    if (msg.length + piece.length > MAX_MSG) {
+      chunks.push(msg);
       msg = '';
     }
-    msg += card;
+    msg += piece;
   }
   if (note) {
     if (msg.length + note.length > MAX_MSG) {
@@ -149,9 +163,41 @@ export async function sendOffers(c, chatId, label, filter = () => true) {
     msg += note;
   }
   chunks.push(msg);
-  const maxMsgs = Math.max(1, Math.min(chunks.length, budget.left - 2));
-  for (let i = 0; i < maxMsgs; i++) await c.send(chatId, chunks[i], i === maxMsgs - 1 ? backMenu() : null);
-  if (maxMsgs < chunks.length) await c.send(chatId, '…hay más ofertas de las que caben aquí. Usa /perfiles para filtrar.', backMenu());
+  const maxMsgs = Math.max(1, Math.min(chunks.length, c.budget.left - 2));
+  for (let i = 0; i < maxMsgs; i++) await c.send(chatId, chunks[i], i === maxMsgs - 1 ? kb : null);
+  if (maxMsgs < chunks.length) await c.send(chatId, moreText, kb);
+}
+
+// ---------- GrupoEPM: convocatorias de la Fundación EPM (leídas de la caché en D1, nunca de la página en vivo) ----------
+const gepmMenu = (on) => [
+  [btn(on ? '🔕 Quitar avisos GrupoEPM' : '🔔 Avisos GrupoEPM', `sub:gepm:${on ? 0 : 1}`)],
+  [btn('📋 Ofertas EPM', 'ofertas'), btn('⬅️ Menú', 'comandos')],
+];
+const GEPM_LINK = `<a href="${GEPM_URL}">página oficial de la Fundación EPM</a>`;
+
+export async function showGepm(c, chatId) {
+  const { db } = c;
+  const meta = await db.getMetas(['gepm_mode', 'gepm_ok', 'gepm_fail']);
+  const head = '🏢 <b>GrupoEPM — convocatorias de la Fundación EPM</b>';
+  const on = !!(await db.getSub(c.vault, chatId)).data?.gepm;
+  if (meta.gepm_mode !== 'test' && meta.gepm_mode !== 'live') {
+    return c.send(chatId, `${head}\nEsta sección aún no está activa. Cuando lo esté, aquí verás las convocatorias vigentes.`, backToMenu());
+  }
+  const now = c.now();
+  const lastOk = Number(meta.gepm_ok) || 0;
+  const rows = await db.gepmOpen(now);
+  const notes = [];
+  if (meta.gepm_mode !== 'live') notes.push('ℹ️ Los avisos automáticos de GrupoEPM aún no están activos; se enviarán cuando se habiliten.');
+  if (lastOk && Number(meta.gepm_fail) >= 2 && now - lastOk > 3 * 3600_000) notes.push(`⚠️ No he podido actualizar la lista desde ${esc(fmtWhen(lastOk))} (hora de Bogotá); esto es lo último que pude leer.`);
+  const note = notes.length ? '\n' + notes.join('\n') : '';
+  if (!lastOk && !rows.length) {
+    return c.send(chatId, `${head}\nTodavía no he podido leer la ${GEPM_LINK}. Inténtalo de nuevo más tarde.${note}`, gepmMenu(on));
+  }
+  if (!rows.length) {
+    return c.send(chatId, `${head}\nNo hay convocatorias vigentes en este momento. Las ya cerradas no se muestran.\nÚltima revisión: ${esc(fmtWhen(lastOk))} (hora de Bogotá). Consulta la ${GEPM_LINK}.${note}`, gepmMenu(on));
+  }
+  const foot = `\nLas postulaciones se hacen siempre en el enlace de cada convocatoria (proyecto no oficial). ${GEPM_LINK}.${note}`;
+  return sendCards(c, chatId, `${head}: ${rows.length} vigente(s)\n`, rows.map((r) => formatGepm(r, { now })), foot, gepmMenu(on), '…hay más convocatorias de las que caben aquí.');
 }
 
 // ---------- comandos ----------
@@ -167,6 +213,7 @@ export async function handleCommand(c, cmd, chat, ctx2 = {}) {
         '<b>¿En qué te puedo ayudar?</b>',
         '📋 <b>Ofertas</b> — ver todas las ofertas abiertas ahora',
         '🎯 <b>Perfiles</b> — filtrar por tu carrera (sistemas, civil, financiera…) o por cargo (profesional, tecnólogo, técnico…) y saber si hay algo para ti',
+        '🏢 <b>GrupoEPM</b> — convocatorias vigentes de la Fundación EPM (otra fuente distinta del portal de empleo), con la opción de recibir avisos de las nuevas',
         '🔔 <b>Suscribirme</b> — recibir un aviso automático (cargo, ubicación, requisitos y enlace) cuando EPM publique ofertas nuevas, de todo o solo de tus perfiles',
         '❓ <b>Ayuda</b> — lista de comandos',
         '',
@@ -178,6 +225,7 @@ export async function handleCommand(c, cmd, chat, ctx2 = {}) {
   if (cmd === 'perfiles') return c.send(chatId, '🎯 <b>Elige cómo filtrar</b>\nTe digo si hay ofertas abiertas para tu perfil:', profilesMenu());
   if (cmd === 'areas') return c.send(chatId, '🎓 <b>Carrera / área</b>\nElige una:', profileGrid(areaProfiles()));
   if (cmd === 'cargos') return c.send(chatId, '🧱 <b>Cargo / nivel</b>\nElige uno:', profileGrid(CARGO_PROFILES));
+  if (cmd === 'gepm' || cmd === 'grupoepm') return showGepm(c, chatId);
   if (cmd === 'suscribir') return showSubscription(c, chatId, ctx2.messageId, (await c.db.getSub(c.vault, chatId)).data);
   if (cmd === 'ayuda' || cmd === 'help') {
     return c.send(
@@ -186,6 +234,7 @@ export async function handleCommand(c, cmd, chat, ctx2 = {}) {
         '<b>Comandos</b>',
         '/comandos — menú con botones',
         '/ofertas — todas las ofertas abiertas',
+        '/grupoepm — convocatorias vigentes de la Fundación EPM',
         '/perfiles — filtrar por carrera o por cargo',
         '/suscribir — elegir qué avisos de ofertas nuevas recibir',
         '/ayuda — esta ayuda',
@@ -215,6 +264,46 @@ async function handleAdmin(c, cmd, rest, chat, isAdmin) {
       await db.removeChat(vault, chat.id);
       await reply('🔕 Grupo desactivado.');
     }
+    return true;
+  }
+  if (cmd === 'gepmodo' || cmd === 'gepmprueba') {
+    // Cualquier otro chat (usuarios, grupos, incluso el administrador desde un grupo) recibe lo mismo que un comando desconocido:
+    // ni se confirma que existan estos comandos.
+    if (!isAdmin || chat.type !== 'private') return false;
+    if (cmd === 'gepmprueba') {
+      const id = (rest[0] || '').trim();
+      const row = /^\d{3}-\d{2}$/.test(id) ? await db.gepmRow(id) : null;
+      if (!row) return deny('Uso: /gepmprueba NNN-AA (una convocatoria que ya esté en la caché).');
+      await reply('🧪 <i>Vista previa del aviso (solo para ti):</i>');
+      await reply(formatGepm(row, { isNew: true, now: c.now() }));
+      return true;
+    }
+    const want = (rest[0] || '').toLowerCase();
+    if (want) {
+      if (!['off', 'test', 'live'].includes(want)) return deny('Uso: /gepmodo off | test | live');
+      await db.setMeta('gepm_mode', want);
+      if (want !== 'off') await db.setMeta('gepm_next', '0'); // que el próximo cron encole una revisión ya
+      await reply(
+        want === 'live'
+          ? '🟢 GrupoEPM en modo <b>live</b>: las convocatorias nuevas se avisan a quienes activaron los avisos.'
+          : want === 'test'
+            ? '🧪 GrupoEPM en modo <b>test</b>: se revisa y guarda la página; los avisos salen solo a ti.'
+            : '⚫ GrupoEPM <b>apagado</b>: no se revisa la página ni se avisa nada.',
+      );
+      return true;
+    }
+    const m = await db.getMetas(['gepm_mode', 'gepm_ok', 'gepm_fail', 'gepm_next']);
+    const cnt = await db.first("SELECT COUNT(*) AS n, SUM(notify = 'pending') AS p FROM gepm");
+    const open = (await db.gepmOpen(c.now())).length;
+    await reply(
+      [
+        `<b>GrupoEPM</b> — modo: <b>${esc(m.gepm_mode || 'off')}</b>`,
+        `Última lectura correcta: ${esc(fmtWhen(Number(m.gepm_ok) || NaN))} (Bogotá) · fallos seguidos: ${esc(m.gepm_fail || '0')}`,
+        `Guardadas: ${cnt?.n ?? 0} · vigentes: ${open} · pendientes de avisar: ${cnt?.p ?? 0}`,
+        '',
+        'Cambiar: /gepmodo off | test | live · Vista previa: /gepmprueba NNN-AA',
+      ].join('\n'),
+    );
     return true;
   }
   if (cmd === 'agregar' || cmd === 'quitar' || cmd === 'chats' || cmd === 'uso') {

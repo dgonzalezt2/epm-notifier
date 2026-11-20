@@ -1,6 +1,7 @@
 // Acceso a D1. Cada método usa pocas consultas (cada una cuesta ~0,35 ms de CPU y 20-45 ms de latencia) y cuenta
 // filas leídas/escritas para el consumo diario. Todo lo que viene de la base se trata como no confiable (cleanLite...).
 import { cleanLite } from './offer.js';
+import { gepmData } from './gepm.js';
 
 export const LIMIT_RE = /(daily|quota|exceed|limit)/i;
 export const isLimitError = (e) => LIMIT_RE.test(String(e?.message || e));
@@ -90,6 +91,33 @@ export function makeDb(env) {
       return stmt('UPDATE seen SET attempts = attempts + 1, first_seen = ? WHERE id = ?', Date.now(), String(id));
     },
 
+    // ---- convocatorias GrupoEPM (Fundación EPM) ----
+    metaStmt(k, v) {
+      return stmt('INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v', k, String(v));
+    },
+    async gepmRows() {
+      return all('SELECT id, data, closes, status, notify, tested FROM gepm');
+    },
+    // Vigentes = con fecha de cierre futura y no canceladas. Los datos guardados se tratan como no confiables (cleanGepm al dibujar).
+    async gepmOpen(now) {
+      return parseGepmRows(await all("SELECT id, data, closes, status FROM gepm WHERE status = 'dated' AND closes > ? ORDER BY closes ASC LIMIT 20", now));
+    },
+    async gepmRow(id) {
+      return parseGepmRows(await all('SELECT id, data, closes, status, notify, tested FROM gepm WHERE id = ?', String(id)))[0] ?? null;
+    },
+    gepmInsertStmt(item, notify, now) {
+      return stmt(
+        'INSERT OR IGNORE INTO gepm (id, data, closes, status, notify, tested, first_seen, updated) VALUES (?, ?, ?, ?, ?, 0, ?, ?)',
+        item.id, JSON.stringify(gepmData(item)), item.closes ?? null, item.status, notify, now, now,
+      );
+    },
+    gepmUpdateStmt(item, now) {
+      return stmt('UPDATE gepm SET data = ?, closes = ?, status = ?, updated = ? WHERE id = ?', JSON.stringify(gepmData(item)), item.closes ?? null, item.status, now, item.id);
+    },
+    gepmNotifyStmt(id, from, to) {
+      return stmt('UPDATE gepm SET notify = ? WHERE id = ? AND notify = ?', to, id, from);
+    },
+
     // ---- suscriptores (cifrados) ----
     async getSub(vault, chatId) {
       const hash = await vault.chatHash(chatId);
@@ -105,7 +133,7 @@ export function makeDb(env) {
     // Cambio optimista: solo escribe si la versión no cambió. Devuelve true si se guardó.
     async putSub(vault, chatId, data, expectedVersion) {
       const hash = await vault.chatHash(chatId);
-      const enc = await vault.seal('subs', hash, { chat: String(chatId), all: !!data.all, profiles: data.profiles });
+      const enc = await vault.seal('subs', hash, { chat: String(chatId), all: !!data.all, profiles: data.profiles, gepm: !!data.gepm });
       const now = Date.now();
       if (expectedVersion === 0) {
         const r = await run('INSERT OR IGNORE INTO subs (chat_hash, enc, version, updated) VALUES (?, ?, 1, ?)', hash, enc, now);
@@ -261,7 +289,21 @@ export function makeDb(env) {
   return db;
 }
 
+function parseGepmRows(rows) {
+  const out = [];
+  for (const r of rows) {
+    try {
+      const data = JSON.parse(r.data);
+      if (data && typeof data === 'object') out.push({ ...r, data });
+    } catch {
+      // fila dañada: se ignora
+    }
+  }
+  return out;
+}
+
 function normSub(d) {
   const profiles = Array.isArray(d?.profiles) ? [...new Set(d.profiles.filter((p) => typeof p === 'string'))] : [];
-  return { chat: String(d?.chat ?? ''), all: !!d?.all, profiles };
+  // gepm: aviso de convocatorias GrupoEPM. Las suscripciones anteriores a esta función no lo traen: quedan en false (apagado).
+  return { chat: String(d?.chat ?? ''), all: !!d?.all, profiles, gepm: d?.gepm === true };
 }

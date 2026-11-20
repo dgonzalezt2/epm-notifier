@@ -11,6 +11,7 @@ import { makeContext } from './lib/context.js';
 import { handleUpdate } from './lib/handlers.js';
 import { runCron } from './lib/cron.js';
 import { consume, RetryLater } from './lib/consumer.js';
+import { gepmIntervalMs } from './lib/gepmjob.js';
 import { isLimitError } from './lib/db.js';
 import { BudgetError, makeTg } from './lib/telegram.js';
 
@@ -171,7 +172,8 @@ export default {
 
   async queue(batch, env) {
     for (const msg of batch.messages) {
-      const c = await makeContext(env);
+      // La revisión de GrupoEPM no cifra ni descifra nada salvo al repartir avisos (lo pide ella misma): ahorra derivar las claves.
+      const c = await makeContext(env, { needVault: msg.body?.t !== 'gepm' });
       try {
         await consume(c, msg);
         msg.ack();
@@ -179,6 +181,16 @@ export default {
       } catch (e) {
         const limit = isLimitError(e) || e instanceof BudgetError;
         console.error('cola:', e?.name || 'Error');
+        if (msg.body?.t === 'gepm') {
+          // La revisión de GrupoEPM es periódica (el cron la vuelve a encolar): como mucho UN reintento (a los 5 min), nunca encola
+          // nada por su cuenta, y la próxima revisión se retrasa para no insistir. Así un fallo suyo no consume reintentos ni cuota
+          // que necesitan las ofertas del portal, que siguen con su política de siempre.
+          await c.db.setMeta('gepm_next', Date.now() + (limit ? 3600_000 : gepmIntervalMs(env))).catch(() => {});
+          await c.db.event(limit ? 'limit' : 'error', `GrupoEPM: revisión fallida (${e?.name || 'Error'})`).catch(() => {});
+          if (limit || msg.attempts >= 2) msg.ack();
+          else msg.retry({ delaySeconds: 300 });
+          continue;
+        }
         // Un límite diario no se arregla reintentando enseguida: se espera más.
         const delay = e instanceof RetryLater ? e.delaySeconds : limit ? 3600 : Number(env.RETRY_DELAY_SECONDS ?? 60);
         if (msg.attempts >= 4) await c.db.event('error', `mensaje descartado (${msg.body?.t || '?'}): ${e?.name || 'Error'}`).catch(() => {});

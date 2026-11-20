@@ -30,7 +30,7 @@ async function registerCommands(c) {
 // dry = true: calcula y devuelve qué haría, sin escribir ni encolar (sirve para probar antes del corte).
 export async function runCron(c, { dry = false, forceBackup = false } = {}) {
   const { env, db, budget } = c;
-  const meta = await db.getMetas(['live', 'cmds', 'epm_fail', 'last_backup']);
+  const meta = await db.getMetas(['live', 'cmds', 'epm_fail', 'last_backup', 'gepm_mode', 'gepm_next']);
   if (meta.live !== '1' && !dry) return { skipped: 'live=0' };
 
   let jobs;
@@ -63,12 +63,17 @@ export async function runCron(c, { dry = false, forceBackup = false } = {}) {
     ...fill.map((j) => ({ body: { t: 'offer', id: String(j.Id), job: jobFromListing(j), notify: false } })),
   ];
 
+  // GrupoEPM: el cron NO descarga ni analiza la página (CPU): solo encola «revisar» cuando toca. La revisión corre en la cola.
+  const gepmOn = meta.gepm_mode === 'test' || meta.gepm_mode === 'live';
+  const gepmDue = gepmOn && now >= Number(meta.gepm_next || 0);
+  if (gepmDue) msgs.push({ body: { t: 'gepm' } });
+
   const d = new Date(now);
   const today = d.toISOString().slice(0, 10);
   // Respaldo automático DESACTIVADO por defecto (ver README): solo corre con la variable BACKUP_ENABLED = "1" (y GH_BACKUP_TOKEN).
   const backupOn = env.BACKUP_ENABLED === '1';
   const backupDue = backupOn && (forceBackup || (d.getUTCDay() === 0 && d.getUTCHours() === 3 && d.getUTCMinutes() < 30 && meta.last_backup !== today));
-  const summary = { listing: jobs.length, fresh: fresh.length, retry: retry.length, fill: fill.length, backupDue, ids: { fresh: fresh.map((j) => String(j.Id)) } };
+  const summary = { listing: jobs.length, fresh: fresh.length, retry: retry.length, fill: fill.length, backupDue, gepm: gepmDue, ids: { fresh: fresh.map((j) => String(j.Id)) } };
   if (dry) return { dry: true, ...summary };
 
   // 1) primero se encola (si falla, la oferta sigue sin marcarse y se reintenta en la siguiente ejecución)
@@ -82,6 +87,7 @@ export async function runCron(c, { dry = false, forceBackup = false } = {}) {
   ];
   // Si EPM devolviera un listado vacío por error, no se vacía la caché de ofertas.
   if (jobs.length) stmts.push(db.pruneOffersStmt([...byId.keys()]));
+  if (gepmDue) stmts.push(db.metaStmt('gepm_next', now + 20 * 60_000));
   if (meta.epm_fail && meta.epm_fail !== '0') stmts.push(db.stmt("UPDATE meta SET v = '0' WHERE k = 'epm_fail'"));
   if (backupDue) {
     stmts.push(db.stmt("INSERT INTO meta (k, v) VALUES ('last_backup', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", today));

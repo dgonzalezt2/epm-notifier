@@ -1,10 +1,16 @@
 // D1 simulada sobre node:sqlite (solo para pruebas unitarias): misma interfaz que usa src/lib/db.js (prepare/bind/all/run/batch).
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const schema = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../migrations/0001_init.sql'), 'utf8');
+// Todas las migraciones, en orden (igual que `wrangler d1 migrations apply`).
+const migrationsDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../migrations');
+const schema = readdirSync(migrationsDir)
+  .filter((f) => f.endsWith('.sql'))
+  .sort()
+  .map((f) => readFileSync(resolve(migrationsDir, f), 'utf8'))
+  .join(';\n');
 
 class Stmt {
   constructor(db, sql, args = [], d1 = null) {

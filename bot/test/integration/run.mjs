@@ -1,5 +1,5 @@
 // Pruebas de integración del Worker real (ver harness.mjs). Uso: node test/integration/run.mjs
-import { makeFakes, startWorker, PORTS, SECRET, STATE_KEY, ADMIN, BOT_TOKEN, H, post, admin, cmd, btn, check, failCount, section, sleep, until, base } from './harness.mjs';
+import { gepmBlock, makeFakes, startWorker, PORTS, SECRET, STATE_KEY, ADMIN, BOT_TOKEN, H, post, admin, cmd, btn, check, failCount, section, sleep, until, base } from './harness.mjs';
 import { htmlProblems } from '../helpers.mjs';
 import { listing } from '../helpers.mjs';
 import { makeVault } from '../../src/lib/crypto.js';
@@ -16,6 +16,7 @@ const reset = () => {
   f.tg.calls.length = 0;
   f.epm.calls.length = 0;
   f.gh.calls.length = 0;
+  f.gepm.calls.length = 0;
 };
 const rowsOf = (t) => W.sql(`SELECT * FROM ${t}`);
 const u = 6000001;
@@ -56,7 +57,7 @@ try {
   check('responde con el menú en el mismo chat', m.length === 1 && m[0].body.text.includes('Bot de ofertas de empleo EPM'));
   check('sin la nota de espera', !m[0].body.text.includes('pueden tardar'));
   check('HTML válido y vista previa desactivada', htmlProblems(m[0].body.text).length === 0 && m[0].body.disable_web_page_preview === true && m[0].body.parse_mode === 'HTML');
-  check('4 botones de menú', m[0].body.reply_markup.inline_keyboard.flat().length === 4);
+  check('5 botones de menú (incluye 🏢 GrupoEPM)', m[0].body.reply_markup.inline_keyboard.flat().length === 5);
   check('no consulta EPM para un menú', f.epm.calls.length === 0);
   reset();
   r = await post(btn(++uid, 'perfiles'));
@@ -107,7 +108,7 @@ try {
   const dump = JSON.stringify([...subs, ...rowsOf('chats')]);
   check('el chat id y los perfiles NO están en claro en D1', !/600000\d|100123/.test(dump) && !dump.includes('civil') && !dump.includes('tecnologo') && subs.every((s) => s.enc.startsWith('v1.')));
   const hA = await vault.chatHash(A);
-  check('se puede descifrar con STATE_KEY y coincide con lo pedido', JSON.stringify(await vault.open('subs', hA, subs.find((s) => s.chat_hash === hA).enc)) === JSON.stringify({ chat: String(A), all: false, profiles: ['civil'] }));
+  check('se puede descifrar con STATE_KEY y coincide con lo pedido', JSON.stringify(await vault.open('subs', hA, subs.find((s) => s.chat_hash === hA).enc)) === JSON.stringify({ chat: String(A), all: false, profiles: ['civil'], gepm: false })); // gepm: GrupoEPM apagado por defecto
   check('la clave de fila es un HMAC (no el chat id)', subs.every((s) => /^[0-9a-f]{32}$/.test(s.chat_hash)));
   const edits = tgOf('editMessageText');
   check('la pulsación edita el menú en el mismo mensaje, con ✅', edits.length >= 3 && edits.every((e) => e.body.message_id) && edits[0].body.text.includes('Civil') && JSON.stringify(edits[0].body.reply_markup).includes('✅ 🏗 Civil'));
@@ -327,6 +328,121 @@ try {
   check('descifrado con STATE_KEY: contiene suscriptores, chats y ofertas', exp.subs.length === rowsOf('subs').length && exp.chats.length === rowsOf('chats').length && exp.offers.length === rowsOf('offers').length && exp.v === 1);
   check('aun descifrado, los suscriptores siguen cifrados fila a fila', exp.subs.every((s2) => s2.enc.startsWith('v1.')) && !JSON.stringify(exp).match(/"chat":/));
   check('conserva solo los últimos 8 respaldos (borra los más antiguos)', f.gh.calls.some((c) => c.method === 'DELETE') && f.gh.files.size <= 9, f.gh.files.size);
+
+  section('GrupoEPM: convocatorias de la Fundación EPM (Worker real + cola + página simulada)');
+  const G1 = 6400001; // usuario sin suscripción
+  const G2 = 6400002; // activa los avisos GrupoEPM
+  const gepmDay = 864e5;
+  const forceNext = () => W.exec(["INSERT INTO meta (k, v) VALUES ('gepm_next', '0') ON CONFLICT(k) DO UPDATE SET v = excluded.v"]);
+  const tickGepm = async () => {
+    forceNext();
+    await admin('/admin/tick', 'POST');
+  };
+  const gepmTo = (chat) => sent(chat).filter((x) => x.body.text.includes('🏢'));
+  reset();
+  r = await post(btn(++uid, 'gepm', G1, 61));
+  check('apagado por defecto: el botón lo dice y no toca la página', r.status === 200 && sent(G1).some((x) => x.body.text.includes('aún no está activa')) && f.gepm.calls.length === 0);
+  await tickGepm();
+  await settle(2500);
+  check('el cron con GrupoEPM apagado no descarga la página ni encola nada', f.gepm.calls.length === 0 && rowsOf('gepm').length === 0);
+  await post(btn(++uid, 'sub:gepm:1', G2, 62));
+  const hG2 = await vault.chatHash(G2);
+  check('un suscriptor activa los avisos GrupoEPM (cifrado en D1)', (await vault.open('subs', hG2, rowsOf('subs').find((s2) => s2.chat_hash === hG2).enc)).gepm === true && !JSON.stringify(rowsOf('subs')).includes('gepm'));
+  const hG1 = await vault.chatHash(G1);
+  check('quien no lo activó no tiene suscripción', !rowsOf('subs').some((s2) => s2.chat_hash === hG1));
+  r = await post(cmd(++uid, '/gepmodo test', 6400009));
+  check('un usuario normal no puede cambiar el modo', sent(6400009).some((x) => x.body.text.includes('Comando no reconocido')) && !sent(6400009).some((x) => x.body.text.includes('administrador')) && rowsOf('meta').find((m2) => m2.k === 'gepm_mode').v === 'off');
+
+  // ---- modo test: primera lectura (baseline) ----
+  reset();
+  r = await post(cmd(++uid, '/gepmodo test', ADMIN, ADMIN));
+  check('el administrador pone GrupoEPM en modo test', r.status === 200 && rowsOf('meta').find((m2) => m2.k === 'gepm_mode').v === 'test');
+  await tickGepm();
+  await until(() => rowsOf('gepm').length === 12, { label: 'primera lectura de GrupoEPM', timeout: 40000 });
+  await settle(1500);
+  const g0 = rowsOf('gepm');
+  check('primera lectura: guarda las 12 más nuevas como vistas, sin avisar', g0.length === 12 && g0.every((x) => x.notify === 'none'), g0.map((x) => x.notify).join());
+  check('la lectura se cortó en las 12 más nuevas y usó el ETag', f.gepm.calls.length === 1 && f.gepm.calls[0].inm === null);
+  check('nadie recibió ningún aviso (ni el suscriptor, ni el administrador)', gepmTo(G2).length === 0 && gepmTo(ADMIN).length === 0 && sent(G2).length === 0);
+
+  // ---- el botón lee la caché (no la página) ----
+  reset();
+  const callsAntes = f.gepm.calls.length;
+  r = await post(btn(++uid, 'gepm', G1, 63));
+  const card = sent(G1).find((x) => x.body.text.includes('025-26'));
+  check('el botón muestra la convocatoria vigente (025-26) desde la caché', !!card && card.body.text.includes('TECNÓLOGO(A) DE COMUNICACIONES') && card.body.text.includes('Postúlate aquí') && card.body.text.includes('(en 3 días)'), JSON.stringify(sent(G1).map((x) => x.body.text.slice(0, 700))));
+  check('las cerradas no se muestran como disponibles', !!card && !card.body.text.includes('023-26') && !card.body.text.includes('002-26'));
+  check('HTML válido, ≤ 4096 y vista previa desactivada', !!card && htmlProblems(card.body.text).length === 0 && card.body.text.length < 4096 && card.body.disable_web_page_preview === true);
+  check('el botón NO descarga la página de GrupoEPM', f.gepm.calls.length === callsAntes && f.epm.calls.length === 0);
+  check('lleva el interruptor de avisos y la nota del modo de prueba', JSON.stringify(card.body.reply_markup).includes('sub:gepm:1') && card.body.text.includes('aún no están activos'));
+
+  // ---- 304: sin cambios no se vuelve a analizar ----
+  await tickGepm();
+  await until(() => f.gepm.calls.length === 1, { label: 'segunda revisión', timeout: 40000 });
+  await settle(1500);
+  check('petición condicional: manda If-None-Match y la página responde 304', f.gepm.calls[0].inm === 'W/"v1"');
+  check('con 304 no cambia ninguna fila', JSON.stringify(rowsOf('gepm')) === JSON.stringify(g0));
+
+  // ---- convocatoria nueva en modo test: el aviso sale SOLO al administrador ----
+  reset();
+  f.gepm.extra = gepmBlock('026-26', Date.now() + 5 * gepmDay);
+  f.gepm.etag = 'W/"v2"';
+  await tickGepm();
+  await until(() => rowsOf('gepm').some((x) => x.id === '026-26'), { label: '026-26', timeout: 40000 });
+  await until(() => gepmTo(ADMIN).length >= 1, { label: 'aviso de prueba al administrador', timeout: 40000 });
+  await settle(2500);
+  check('modo test: UN aviso, solo al administrador', gepmTo(ADMIN).length === 1 && gepmTo(ADMIN)[0].body.text.startsWith('🆕 🏢') && gepmTo(ADMIN)[0].body.text.includes('026-26 PROFESIONAL DE PRUEBA'));
+  check('el suscriptor con GrupoEPM activado NO recibe nada en modo test', gepmTo(G2).length === 0 && sent(G2).length === 0);
+  check('queda pendiente de avisar a los suscriptores (modo live) y marcada como probada', rowsOf('gepm').find((x) => x.id === '026-26').notify === 'pending' && rowsOf('gepm').find((x) => x.id === '026-26').tested === 1);
+  f.gepm.etag = 'W/"v3"'; // contenido igual, ETag distinto: se vuelve a leer, no se repite el aviso
+  await tickGepm();
+  await settle(4000);
+  check('otra lectura de lo mismo no repite el aviso de prueba', gepmTo(ADMIN).length === 1);
+
+  // ---- modo live: solo quien activó el interruptor ----
+  reset();
+  await post(cmd(++uid, '/gepmodo live', ADMIN, ADMIN));
+  f.gepm.etag = 'W/"v4"';
+  await tickGepm();
+  await until(() => gepmTo(G2).length >= 1, { label: 'aviso al suscriptor', timeout: 40000 });
+  await settle(2500);
+  check('modo live: el suscriptor con GrupoEPM recibe el aviso pendiente, una vez', gepmTo(G2).length === 1 && gepmTo(G2)[0].body.text.includes('026-26'));
+  check('quien no activó el interruptor, el administrador (ya lo tenía) y los chats autorizados NO reciben nada', gepmTo(G1).length === 0 && gepmTo(ADMIN).length === 0 && sent(-100999).filter((x) => x.body.text.includes('🏢')).length === 0 && sent(-100123).filter((x) => x.body.text.includes('🏢')).length === 0);
+  check('queda como avisada (done)', rowsOf('gepm').find((x) => x.id === '026-26').notify === 'done');
+  f.gepm.etag = 'W/"v5"';
+  await tickGepm();
+  await settle(4000);
+  check('la misma convocatoria en otra revisión no se vuelve a avisar', gepmTo(G2).length === 1);
+  f.gepm.extra = gepmBlock('027-26', Date.now() + 6 * gepmDay) + f.gepm.extra;
+  f.gepm.etag = 'W/"v6"';
+  await tickGepm();
+  await until(() => gepmTo(G2).length >= 2, { label: '027-26', timeout: 40000 });
+  await settle(2500);
+  check('una convocatoria nueva en live se avisa una vez al suscriptor', gepmTo(G2).length === 2 && gepmTo(G2)[1].body.text.includes('027-26'));
+  check('el reparto usó la clave g:NNN-AA y un solo envío por destinatario', rowsOf('sent').filter((x) => x.offer_id === 'g:027-26').length === 1 && rowsOf('sent').filter((x) => x.offer_id === 'g:026-26').length === 2);
+
+  // ---- la página cambia de estructura ----
+  reset();
+  const filasAntes = JSON.stringify(rowsOf('gepm'));
+  f.gepm.broken = true;
+  f.gepm.etag = 'W/"roto"';
+  await tickGepm();
+  await until(() => sent(ADMIN).some((x) => x.body.text.includes('no encontré ninguna convocatoria')), { label: 'alerta de estructura', timeout: 40000 });
+  await settle(1500);
+  check('estructura rota: no se marca ni se avisa nada y las filas siguen igual', JSON.stringify(rowsOf('gepm')) === filasAntes && gepmTo(G2).length === 0);
+  check('se avisa SOLO al administrador, sin copiar la página', sent(ADMIN).filter((x) => x.body.text.includes('GrupoEPM')).length === 1 && sent(G2).length === 0 && !sent(ADMIN).some((x) => x.body.text.includes('mantenimiento')));
+  await tickGepm();
+  await settle(4000);
+  check('con la página aún rota no se repite la alerta (enfriamiento)', sent(ADMIN).filter((x) => x.body.text.includes('no encontré ninguna convocatoria')).length === 1);
+  check('el botón sigue mostrando lo último leído (la caché no se vacía)', (await post(btn(++uid, 'gepm', G1, 64))).status === 200 && sent(G1).some((x) => x.body.text.includes('025-26')));
+  f.gepm.broken = false;
+  f.gepm.etag = 'W/"v7"';
+  await tickGepm();
+  await until(() => rowsOf('meta').find((m2) => m2.k === 'gepm_fail')?.v === '0', { label: 'recuperación', timeout: 40000 });
+  check('al recuperarse la página se reinicia el contador de fallos', true);
+  check('los eventos registran el fallo sin datos de usuarios', rowsOf('events').some((e) => e.detail && e.detail.startsWith('GrupoEPM: estructura')) && !rowsOf('events').some((e) => /6400|1234/.test(e.detail || '')));
+  r = await post(cmd(++uid, '/gepmodo off', ADMIN, ADMIN));
+  check('el administrador apaga GrupoEPM', rowsOf('meta').find((m2) => m2.k === 'gepm_mode').v === 'off');
 
   section('Logs: nada sensible');
   const logs = W.logs.join('');

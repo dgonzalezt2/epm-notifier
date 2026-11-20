@@ -8,9 +8,12 @@ import { isGone, TelegramError } from './telegram.js';
 import { adminId } from './handlers.js';
 import { doBackup } from './backup.js';
 import { JOB_ID_RE } from './util.js';
+import { processGepm } from './gepmjob.js';
 
 const CHUNK = 35; // avisos por mensaje de cola (cabe en las 50 subpeticiones de una invocación)
 const HEX32 = /^[0-9a-f]{32}$/;
+// Clave de la oferta en la tabla de envíos: id numérico del portal Oracle, o `g:NNN-AA` para una convocatoria de GrupoEPM.
+const OFFER_KEY_RE = /^(\d{1,12}|g:\d{3}-\d{2})$/;
 
 export class RetryLater extends Error {
   constructor(msg, delaySeconds = 30) {
@@ -77,7 +80,7 @@ async function processOffer(c, b) {
 
 async function processNotify(c, b) {
   const { env, db, vault, tg } = c;
-  if (!JOB_ID_RE.test(String(b.offer)) || typeof b.html !== 'string' || !Array.isArray(b.hashes)) return;
+  if (!OFFER_KEY_RE.test(String(b.offer)) || typeof b.html !== 'string' || !Array.isArray(b.hashes)) return;
   const hashes = b.hashes.filter((h) => HEX32.test(h));
   const adm = adminId(env);
   const adminHash = b.admin && adm ? await vault.chatHash(adm) : null;
@@ -116,5 +119,6 @@ export async function consume(c, msg) {
   const b = msg.body;
   if (b?.t === 'offer') return processOffer(c, b);
   if (b?.t === 'notify') return processNotify(c, b);
+  if (b?.t === 'gepm') return processGepm(c);
   if (b?.t === 'backup') return c.env.BACKUP_ENABLED === '1' ? doBackup(c) : undefined; // inerte salvo BACKUP_ENABLED = "1"
 }

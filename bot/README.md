@@ -42,13 +42,26 @@ Medido en Cloudflare con un Worker de prueba (después borrado): EPM responde de
 Con 500 suscriptores, 2.000 updates y 5 ofertas al día: ≈ 130 k lecturas (2,6 %) y ≈ 6 k escrituras (6 %). El tope realista es el de 100.000 peticiones bajo abuso.
 `/uso` (solo administrador) muestra el consumo del día; `GET /admin/status` (con el secreto) devuelve recuentos.
 
-## Esquema de D1 (`migrations/0001_init.sql`)
+## Esquema de D1 (`migrations/0001_init.sql` y `0002_gepm.sql`)
 `meta` (live…) · `seen` (ofertas vistas) · `offers` (datos públicos de cada oferta) · `subs` y `chats` (**cifrados**, clave de fila = HMAC del chat) ·
-`sent` (un aviso por oferta y destinatario) · `applied` (dedupe de updates) · `usage` y `events` (consumo y errores, sin datos de usuarios).
+`sent` (un aviso por oferta y destinatario; `offer_id` es el id numérico de Oracle o `g:NNN-AA` para GrupoEPM) · `applied` (dedupe de updates) · `usage` y `events` (consumo y errores, sin datos de usuarios) ·
+`gepm` (convocatorias de la Fundación EPM, datos públicos ya limpios; ver abajo).
 
 **Cifrado:** AES-GCM con claves derivadas de `STATE_KEY` por HKDF; el texto cifrado va atado a su fila (no se puede copiar de una fila a otra) y la clave de fila es un HMAC,
 así que ni el chat id ni los perfiles elegidos están en claro en D1. Los cambios usan control de versión (compare-and-swap) con reintentos, y las elecciones son absolutas
 («activar X»/«quitar X»), por lo que repetir una pulsación no hace daño.
+
+## GrupoEPM (convocatorias de la Fundación EPM)
+Fuente distinta del portal Oracle HCM: <https://www.grupo-epm.com/fundacion-grupo-epm/trabaja-con-nosotros/convocatorias/>. Qué muestra, cómo se detecta, el interruptor y sus límites: [README raíz](../README.md#grupoepm-convocatorias-de-la-fundación-epm). Aquí, lo técnico:
+
+- **Código:** [gepm.js](src/lib/gepm.js) (lectura por flujo, análisis, fechas, enlaces, tarjeta y `reconcile`; funciones puras salvo `fetchGepm`) y [gepmjob.js](src/lib/gepmjob.js) (la revisión, en el consumidor de la cola). El cron solo añade una entrada a su único mensaje por lote.
+- **Tabla `gepm`** (migración aditiva `0002_gepm.sql`, no toca nada existente): `id` NNN-AA (clave de deduplicación) · `data` JSON público · `closes` (ms UTC o NULL) · `status` `dated`/`closed`/`cancelled` · `notify` `none` (vista, no se avisa) / `pending` / `done` · `tested` (aviso de prueba ya encolado al administrador).
+- **Suscripción:** el campo `gepm` (booleano, apagado por defecto) va dentro del mismo registro cifrado de `subs`; los registros anteriores no lo traen y se leen como `false`. Una fila solo con `gepm` cuenta como suscripción (y para `MAX_SUBS`).
+- **Claves de `meta`:** `gepm_mode` (`off` por defecto · `test` · `live`), `gepm_next` (cuándo toca la próxima revisión; el cron la reserva 20 min al encolar y la revisión la fija a +60 min), `gepm_etag`, `gepm_ok` (última lectura correcta), `gepm_fail` (fallos seguidos), `gepm_init` (primera lectura hecha) y `gepm_alert` (último aviso al administrador, enfriamiento de 12 h). Variables opcionales (no secretas): `GEPM_EVERY_MIN` (por defecto 60) y `GEPM_URL` (solo para pruebas).
+- **Flujo de una revisión (mensaje `gepm` de la cola):** (1) con `off` no hace nada; (2) descarga como flujo hasta 12 convocatorias o 160 KB, con `If-None-Match` si hay filas y ETag (304 = nada que analizar); (3) 200 sin convocatorias legibles = fallo «estructura»: no escribe filas, alerta solo al administrador; (4) guarda en **una escritura atómica** las filas nuevas (`pending`, o `none` si es la primera lectura, está cerrada, cancelada o sin fecha), las actualizaciones y las marcas de la revisión; (5) **después** encola los avisos (en `test`, un mensaje solo al administrador; en `live`, mensajes de ≤ 35 destinatarios con `gepm = true`) y solo entonces pasa la fila a `done`. Si algo se corta entre (4) y (5), la siguiente revisión la encuentra `pending` y la reintenta; el reparto es el de siempre (`sent`: un par convocatoria-destinatario se reclama antes de enviar).
+- **Aislamiento y reintentos (`src/index.js`, `queue()`):** un mensaje `gepm` que lanza una excepción se reintenta **una sola vez** (5 min); un límite diario de D1 se descarta sin reintentar; en ambos casos se retrasa `gepm_next` (≥ 1 h) y se registra un evento sin datos de usuarios. Nunca encola mensajes y no toca la política de reintentos de las ofertas (60 s, hasta `max_retries = 3`). Pruebas: `test/unit/gepm-flow.test.mjs` (manejador real de la cola, lotes de 1, D1 roto solo para la tabla `gepm`).
+- **Autorización:** `/gepmodo` y `/gepmprueba` solo responden al administrador en su chat privado; para cualquier otro chat caen al «Comando no reconocido» de siempre (misma respuesta y mismo teclado, sin cambios en D1: probado con usuarios, suscriptores, chats autorizados, el administrador desde un grupo y botones forjados).
+- **Límites medidos (Cloudflare, plan gratuito):** el análisis completo cuesta ~7 ms de CPU en una invocación HTTP caliente (1–2 ms con 304); en la cola, 11–30 ms por el arranque en frío de cada invocación. La documentación de Queues dice 30 s de CPU por defecto para el consumidor, pero también que comparte los límites por invocación de cualquier Worker; en esta cuenta las invocaciones de la cola terminaron siempre bien (ver el riesgo en el README raíz).
 
 ## Secretos (`wrangler secret put`) — nunca en el repositorio
 | Secreto | Para qué |
@@ -127,5 +140,6 @@ npm test                    # unitarias: cifrado, fechas en Bogotá, audiencia, 
 npm run test:migration      # migración del formato antiguo (OpenSSL) a D1 y vuelta atrás
 npm run test:integration    # Worker real (wrangler dev: D1 y cola locales) con Telegram, EPM y GitHub simulados
 ```
+Hay además pruebas de GrupoEPM: `test/unit/gepm.test.mjs` (extracto **real** de la página como fixture, fechas, enlaces, limpieza, estructura cambiada, lectura por flujo y tarjeta) y `test/unit/gepm-flow.test.mjs` (estado, deduplicación, cortes a mitad, modos test/live, suscripción cifrada, botón y administración, con D1 y cola simuladas).
 Las de integración cubren: 401/405/413/400, tipos descartados, límite por chat, respuesta inmediata, caché vacía, cron en vivo y cola, avisos sin duplicados, 8 pulsaciones simultáneas,
-cron + pulsaciones a la vez, reparto a 83 destinatarios, bloqueos (403) y 429, EPM caído, detalle que falla, ofertas ya cerradas, límites de D1 simulados, respaldo cifrado y ausencia de datos sensibles en logs.
+cron + pulsaciones a la vez, reparto a 83 destinatarios, bloqueos (403) y 429, EPM caído, detalle que falla, ofertas ya cerradas, límites de D1 simulados, respaldo cifrado, **GrupoEPM de punta a punta** (apagado, primera lectura sin avisos, 304, aviso solo al administrador en `test`, aviso solo a quien activó el interruptor en `live`, sin duplicados, y la página rota) y ausencia de datos sensibles en logs.
